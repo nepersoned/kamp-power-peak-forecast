@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+catboost_info/
+outputs/
+experiments/*.pkl
+.ipynb_checkpoints/
+.venv/
