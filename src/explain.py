@@ -95,7 +95,7 @@ def waterfall(sv_row, base, x_row, title, path, max_display=10):
 
 
 # ---------------- DiCE: 피크 시간 생산계획 반사실 ----------------
-CTRL = ["prod", "workers", "prod_prev_h", "prod_next_h"]
+CTRL = ["prod", "prod_prev_h", "prod_next_h"]
 
 
 class ControlWrapper:
@@ -110,8 +110,6 @@ class ControlWrapper:
         for c in CTRL:
             X[c] = Z[c].to_numpy(float)
         X["prod_roll3"] = (X["prod_prev_h"] + X["prod"] + X["prod_next_h"]) / 3
-        w_prev_next = self.x["workers_roll3"] * 3 - self.x["workers"]
-        X["workers_roll3"] = (w_prev_next + X["workers"]) / 3
         X["log_prod"] = np.log1p(X["prod"])
         dp = self.day_prod + (X["prod"] - self.x["prod"]) + (X["prod_prev_h"] - self.x["prod_prev_h"]) \
             + (X["prod_next_h"] - self.x["prod_next_h"])
@@ -134,13 +132,13 @@ def dice_peak_actions(predict_fn, X_rows, day_prod, out, n_cf=3, tau=TAU, seed=0
         if base_pred < tau:
             continue
         hi = {c: max(float(x[c]) * 2, 1.0) for c in CTRL}
-        rng = {"prod": [0.0, float(x["prod"])], "workers": [0.0, float(x["workers"])],
+        rng = {"prod": [0.0, float(x["prod"])],
                "prod_prev_h": [float(x["prod_prev_h"]), hi["prod_prev_h"] + float(x["prod"])],
                "prod_next_h": [float(x["prod_next_h"]), hi["prod_next_h"] + float(x["prod"])]}
         frame = pd.DataFrame([{c: v for c, v in zip(CTRL, vals)} for vals in
                               np.random.default_rng(seed).uniform([r[0] for r in rng.values()],
                                                                   [max(r[1], r[0] + 1e-6) for r in rng.values()],
-                                                                  size=(300, 4))])
+                                                                  size=(300, len(CTRL)))])
         frame["y"] = wrapper.predict(frame)
         d = dice_ml.Data(dataframe=frame, continuous_features=CTRL, outcome_name="y")
         m = dice_ml.Model(model=wrapper, backend="sklearn", model_type="regressor")
@@ -161,8 +159,7 @@ def dice_peak_actions(predict_fn, X_rows, day_prod, out, n_cf=3, tau=TAU, seed=0
         best = cfs.sort_values("cut_prod_pct").iloc[0]
         rows.append(dict(timestamp=ts, hour=int(x["hour"]), pred=round(base_pred, 1), found=True,
                          cf_pred=round(float(best["y"]), 1), prod=float(x["prod"]), cf_prod=round(float(best["prod"])),
-                         cut_prod_pct=round(float(best["cut_prod_pct"]), 1), workers=float(x["workers"]),
-                         cf_workers=round(float(best["workers"]), 2),
+                         cut_prod_pct=round(float(best["cut_prod_pct"]), 1),
                          moved_to_neighbors=round(float(best["moved_to_neighbors"]))))
     res = pd.DataFrame(rows)
     res.to_csv(out / "dice_peak_actions.csv", index=False, encoding="utf-8-sig")

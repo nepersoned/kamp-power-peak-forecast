@@ -16,7 +16,8 @@ HOLIDAYS = pd.to_datetime([
     "2021-05-05", "2021-05-19", "2021-06-06", "2021-08-15", "2021-08-16",
 ])
 
-PLAN = ["prod", "workers", "prod_day", "prod_share", "workers_day", "prod_prev_h", "prod_next_h"]
+# 공장인원은 생산량 / (시간 내 15분 전력 합)으로 정확히 계산되는 값(오차 1e-9) -> 타깃 누수라 사용하지 않는다
+PLAN = ["prod", "prod_day", "prod_share", "prod_prev_h", "prod_next_h"]
 WEATHER = ["temp", "humid", "wind", "rain", "temp_day_max"]
 
 
@@ -69,15 +70,14 @@ def build(df, use_plan=True):
 
     if use_plan:
         day = df.index.normalize()
-        X["prod"], X["workers"] = df["prod"], df["workers"]
+        X["prod"] = df["prod"]
         X["prod_day"] = df["prod"].groupby(day).transform("sum")
         X["prod_share"] = (df["prod"] / X["prod_day"].replace(0, np.nan)).fillna(0)
-        X["workers_day"] = df["workers"].groupby(day).transform("sum")
         X["prod_prev_h"] = df["prod"].groupby(day).shift(1).fillna(0)
         X["prod_next_h"] = df["prod"].groupby(day).shift(-1).fillna(0)   # 당일 계획이므로 다음 시간 값도 사용 가능
         X["log_prod"] = np.log1p(df["prod"])
         # 시간 단위 운전 스케줄: 가동 시작/종료 시각, 야간조 유무, 주변 3시간 계획량
-        active = (df["prod"].fillna(0) > 0) | (df["workers"].fillna(0) > 0)
+        active = df["prod"].fillna(0) > 0
         hrs = df["hour"].where(active)
         X["first_active_h"] = hrs.groupby(day).transform("min")
         X["last_active_h"] = hrs.groupby(day).transform("max")
@@ -85,9 +85,8 @@ def build(df, use_plan=True):
         X["after_end"] = (df["hour"] > X["last_active_h"]).astype(int)
         X["night_shift"] = df["prod"].where(df["hour"] < 7, 0).groupby(day).transform("sum")
         X["prod_roll3"] = df["prod"].groupby(day).transform(lambda s: s.rolling(3, center=True, min_periods=1).mean())
-        X["workers_roll3"] = df["workers"].groupby(day).transform(lambda s: s.rolling(3, center=True, min_periods=1).mean())
         # 운전 레짐: 생산계획이 있으면 가동일(원본 데이터에서 예외 0건). 계획 누락일은 NaN 유지
-        plan_on = ((X["prod_day"] > 0) | (X["workers_day"] > 0)).astype(float)
+        plan_on = (X["prod_day"] > 0).astype(float)
         X["plan_on_day"] = plan_on.mask(df["plan_missing"])
         X["planned_shutdown"] = ((plan_on == 0) & (X["is_offday"] == 0)).astype(float).mask(df["plan_missing"])
         X = X.join(_last_operating_day_lags(df, plan_on.mask(df["plan_missing"], 1.0)))
