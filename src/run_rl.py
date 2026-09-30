@@ -15,6 +15,7 @@ from . import tariff as T
 from .data import load
 from .features import build
 from .models import RegimeModel, operating
+from .milp import evaluate_milp, fit_surrogate
 from .rl_env import DayData, PeakControlEnv, Simulator, policy_noop, policy_peak_rule, run_policy
 
 warnings.filterwarnings("ignore")
@@ -68,7 +69,9 @@ def build_all():
             out.append(DayData(df, X, d, day_floor(q, d)))
         return out
 
-    return sim, days(START, TEST0), days(TEST0, END)
+    sur_mask = (operating(X) & ~copy & (~df["outage"]).to_numpy() & (t >= START) & (t < TEST0))
+    coefs = fit_surrogate(df, sur_mask)
+    return sim, days(START, TEST0), days(TEST0, END), coefs
 
 
 def summarize(res, name):
@@ -81,12 +84,13 @@ def summarize(res, name):
                 demand_change_kw=round((res["new_demand"] - res["base_demand"]).mean(), 2),
                 labor_premium_won=round(res["new_labor"].mean(), 0),
                 moved_share=round((res["moved"] / res["day_prod"]).mean(), 3),
+                extra_starts=round(res["extra_starts"].mean(), 2),
                 seed_std=round(g["reward_kwon"].mean().std(), 3))
 
 
 def main(timesteps=60000, labor_won=0.0):
     OUT.mkdir(parents=True, exist_ok=True)
-    sim, train_days, test_days = build_all()
+    sim, train_days, test_days, coefs = build_all()
     print(f"train days {len(train_days)}, test days {len(test_days)}", flush=True)
     env = PeakControlEnv(test_days, sim, labor_won=labor_won, seed=123)
     rows, per_day = [], []
@@ -95,6 +99,9 @@ def main(timesteps=60000, labor_won=0.0):
         r = run_policy(env, pol, len(test_days), oracle=oracle, labor_won=labor_won)
         rows.append(summarize(r, name)); per_day.append(r.assign(policy=name))
         print(rows[-1], flush=True)
+    r, _ = evaluate_milp(sim, test_days, coefs, labor_won=labor_won)
+    rows.append(summarize(r, "래칫 인지 MILP")); per_day.append(r.assign(policy="래칫 인지 MILP"))
+    print(rows[-1], flush=True)
 
     if timesteps > 0:
         from stable_baselines3 import PPO

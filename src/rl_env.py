@@ -3,6 +3,7 @@
 에피소드 = 가동일 하루. 매 시각 h에서 "이번 시간 계획 물량 중 얼마를 지금 돌릴지" 고른다.
   행동 0/1/2 = 이번 시간 신규 물량의 0% / 50% / 100% 가동(미룬 물량은 대기열로).
   현실 제약: 미룬 물량은 최대 MAX_DELAY시간 안에 반드시 처리, 시간당 생산은 원래 계획 최대치 × CAP_MULT 이하,
+            가동 시작 횟수가 원래 계획보다 늘면 큰 벌점(한 시간씩 켜고 끄는 펄스 운전 방지),
             23시에는 남은 물량 전부 처리(일 생산 총량 보존). → "가동 시각을 최대 2시간 늦추는 시차 기동"만 허용.
   (제약 없이 탐색하면 하루 생산을 한 시간에 몰아 시뮬레이터의 학습 범위 밖을 파고드는 것을 확인)
 시뮬레이터: 학습된 예측 모델(시간별 평균전력·15분 최대수요)에 검증 가동일의 하루 잔차 경로를 통째로 표본 추출해 더한다.
@@ -21,6 +22,12 @@ from . import tariff as T
 FRACTIONS = np.array([0.0, 0.5, 1.0])
 MAX_DELAY = 2
 CAP_MULT = 1.0
+START_PENALTY_WON = 300_000   # 원래 계획보다 가동 시작(켜고 끄기)이 늘어날 때 1회당 벌점 — 사실상 금지
+
+
+def n_starts(p):
+    on = np.asarray(p) > 0
+    return int((on & ~np.r_[False, on[:-1]]).sum())
 PLAN_COLS = ["prod", "prod_day", "prod_share", "prod_prev_h", "prod_next_h", "log_prod", "first_active_h",
              "last_active_h", "before_start", "after_end", "night_shift", "prod_roll3"]
 
@@ -90,8 +97,10 @@ class Simulator:
         demand = float(np.max(np.where(dd.demand_band > T.OFF, pk, 0.0)))
         ratchet = T.BASE_RATE["II"] * max(0.0, demand - dd.floor) * months_ahead
         labor = float((np.asarray(prod) * (dd.labor - 1.0)).sum() * labor_won)  # 할증분만
-        return dict(total=energy + ratchet + labor, energy=energy, ratchet=ratchet, labor=labor,
-                    demand=demand, peak_all=float(pk.max()))
+        extra = max(0, n_starts(prod) - n_starts(dd.prod))
+        switch = START_PENALTY_WON * extra
+        return dict(total=energy + ratchet + labor + switch, energy=energy, ratchet=ratchet, labor=labor,
+                    switch=switch, extra_starts=extra, demand=demand, peak_all=float(pk.max()))
 
 
 class PeakControlEnv(gym.Env):
@@ -223,5 +232,5 @@ def run_policy(env, policy, n_days, seeds=(0, 1, 2), oracle=False, labor_won=0.0
                              base_energy=info["base"]["energy"], new_energy=info["new"]["energy"],
                              base_demand=info["base"]["demand"], new_demand=info["new"]["demand"],
                              base_ratchet=info["base"]["ratchet"], new_ratchet=info["new"]["ratchet"],
-                             new_labor=info["new"]["labor"]))
+                             new_labor=info["new"]["labor"], extra_starts=info["new"]["extra_starts"]))
     return pd.DataFrame(rows)
