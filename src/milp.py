@@ -51,10 +51,12 @@ def _S_numeric(p, cf):
     return cf["gain"] * on + cf["prev"] * prev + cf["next"] * nxt + cf["start"] * start + cf["beta"] * np.asarray(p)
 
 
-def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahead=12, time_limit_s=20):
+def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahead=12, time_limit_s=20, base=None,
+              labor_won=0.0):
+    """base=(시간별 전력, 15분최대) 예측을 직접 주면 그 예측기로 계획(결정 기반 평가용). 없으면 시뮬레이터 기대값."""
     plan = dd.prod
     cap = max(plan.max() * cap_mult, 1.0)
-    base_pw, base_pk = sim.expected(dd, plan)
+    base_pw, base_pk = base if base is not None else sim.expected(dd, plan)
     S0 = {t: _S_numeric(plan, coefs[t]) for t in ("power", "peak15")}
     solver = pywraplp.Solver.CreateSolver("SCIP") or pywraplp.Solver.CreateSolver("CBC")
     H = range(24)
@@ -88,13 +90,16 @@ def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahe
             solver.Add(D >= peak[t])
     r = solver.NumVar(0, solver.infinity(), "ratchet_excess")
     solver.Add(r >= D - dd.floor)
-    solver.Minimize(sum(float(dd.rate[t]) * power[t] for t in H) + T.BASE_RATE["II"] * months_ahead * r)
+    labor = sum(float(dd.labor[t] - 1.0) * labor_won * p[t] for t in H)     # 1.5배 시간대 할증분
+    solver.Minimize(sum(float(dd.rate[t]) * power[t] for t in H) + T.BASE_RATE["II"] * months_ahead * r + labor)
     solver.SetTimeLimit(int(time_limit_s * 1000))
     status = solver.Solve()
     if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
         return plan.copy(), "fail"
-    return np.array([sum(x[h, t - h].solution_value() for h in range(max(0, t - max_delay), t + 1) if (h, t - h) in x)
-                     for t in H]), "optimal" if status == pywraplp.Solver.OPTIMAL else "feasible"
+    sol = np.array([sum(x[h, t - h].solution_value() for h in range(max(0, t - max_delay), t + 1) if (h, t - h) in x)
+                    for t in H])
+    sol[sol < 1e-3] = 0.0            # 풀이기 찌꺼기(1e-9 수준)가 '가동'으로 세어지지 않게
+    return sol, "optimal" if status == pywraplp.Solver.OPTIMAL else "feasible"
 
 
 def evaluate_milp(sim, days, coefs, seeds=(0, 1, 2), labor_won=0.0):

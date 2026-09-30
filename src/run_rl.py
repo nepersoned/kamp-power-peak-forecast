@@ -88,7 +88,7 @@ def summarize(res, name):
                 seed_std=round(g["reward_kwon"].mean().std(), 3))
 
 
-def main(timesteps=60000, labor_won=0.0):
+def main(timesteps=60000, labor_won=0.0, load=False):
     OUT.mkdir(parents=True, exist_ok=True)
     sim, train_days, test_days, coefs = build_all()
     print(f"train days {len(train_days)}, test days {len(test_days)}", flush=True)
@@ -103,13 +103,16 @@ def main(timesteps=60000, labor_won=0.0):
     rows.append(summarize(r, "래칫 인지 MILP")); per_day.append(r.assign(policy="래칫 인지 MILP"))
     print(rows[-1], flush=True)
 
-    if timesteps > 0:
+    if timesteps > 0 or load:
         from stable_baselines3 import PPO
-        tenv = PeakControlEnv(train_days, sim, labor_won=labor_won, seed=7, shaped=True)
-        model = PPO("MlpPolicy", tenv, n_steps=24 * 64, batch_size=256, gamma=1.0, learning_rate=3e-4,
-                    ent_coef=0.01, seed=0, verbose=0)
-        model.learn(total_timesteps=timesteps)
-        model.save(OUT / f"ppo_labor{labor_won:g}")
+        if load:
+            model = PPO.load(OUT / f"ppo_labor{labor_won:g}")
+        else:
+            tenv = PeakControlEnv(train_days, sim, labor_won=labor_won, seed=7, shaped=True)
+            model = PPO("MlpPolicy", tenv, n_steps=24 * 64, batch_size=256, gamma=1.0, learning_rate=3e-4,
+                        ent_coef=0.01, seed=0, verbose=0)
+            model.learn(total_timesteps=timesteps)
+            model.save(OUT / f"ppo_labor{labor_won:g}")
         r = run_policy(env, lambda o, e: int(model.predict(o, deterministic=True)[0]), len(test_days))
         rows.append(summarize(r, "PPO")); per_day.append(r.assign(policy="PPO"))
         print(rows[-1], flush=True)
@@ -125,5 +128,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--timesteps", type=int, default=60000)
     ap.add_argument("--labor", type=float, default=0.0)
+    ap.add_argument("--load", action="store_true", help="저장된 PPO 모델로 평가만")
     a = ap.parse_args()
-    main(a.timesteps, a.labor)
+    main(a.timesteps, a.labor, a.load)

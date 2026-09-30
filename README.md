@@ -13,6 +13,17 @@ python run_all.py
 
 전처리 → 학습 → 검증/테스트 평가 → 오류분석 → 피크 저감 시뮬레이션 → SHAP·DiCE 해석 → 그림 생성까지 한 번에 실행되며, 결과는 `outputs/`에 저장된다. CPU 기준 약 10분.
 
+추가 분석(각각 독립 실행, 결과는 `outputs/` 하위 폴더):
+
+```bash
+python -m src.peak_conditions      # 피크 발생 조건 (outputs/peak_conditions/)
+python -m src.tariff               # 한전 요금·래칫 월별 계산 (outputs/tariff/)
+python -m src.eval_conditions      # 조건별 오차, 모델 간 차이 부트스트랩 CI (outputs/conditions/)
+python -m src.decision_eval test   # 결정 기반 평가: 예측기별 MILP 계획의 실제 절감 (outputs/decision/), valid도 가능
+python -m src.run_rl --timesteps 200000   # 제어 정책 비교: 무조치·규칙·탐색·MILP·PPO (outputs/rl/), --load로 저장 모델 평가
+pytest -q                          # 누수 감사 테스트
+```
+
 ## 데이터
 
 `data/okm_augumented_2021.csv` — KAMP 자원 최적화 AI 데이터셋 (2021-01-01 ~ 09-14, 1시간 단위 6,168행).
@@ -68,6 +79,15 @@ src/peak.py         피크 위험 판정, 피크 저감 시뮬레이션
 src/explain.py      SHAP(전역·의존도·상호작용·개별사례), DiCE 반사실
 src/evaluate.py     평가 지표
 src/plots.py        보고서용 그림
+src/peak_conditions.py  피크 발생 조건 분석
+src/tariff.py       한전 산업용(을) 고압A 요금: 계시별 전력량요금, 기본요금, 래칫
+src/rl_env.py       당일 수요 제어 강화학습 환경(gymnasium)과 기준 정책
+src/milp.py         래칫 인지 MILP 부하이동(OR-Tools)
+src/run_rl.py       제어 정책 비교 실행
+src/decision_eval.py    결정 기반 평가(실측 고정), 인건비 할증 시나리오
+src/eval_conditions.py  조건별 오차, 짝지은 부트스트랩
+tests/              누수 감사 테스트
+docs/PROGRESS.md    진행 기록과 팀 계획
 experiments/        튜닝·앙상블 실험 스크립트와 결과
 ```
 
