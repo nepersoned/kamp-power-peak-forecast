@@ -106,8 +106,12 @@ class Simulator:
 class PeakControlEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, days, sim, labor_won=0.0, seed=0, cap_mult=CAP_MULT, max_delay=MAX_DELAY):
+    def __init__(self, days, sim, labor_won=0.0, seed=0, cap_mult=CAP_MULT, max_delay=MAX_DELAY, shaped=False):
+        """shaped=True: 학습용. 노이즈 없는 기대 비용으로 매 시각 잠재함수 기반 보상
+        r_t = Φ(s_{t+1}) − Φ(s_t),  Φ = −기대비용(지금까지 실행 + 남은 물량은 다음 시간/원래 계획대로) / 1000.
+        합계는 하루 기대 절감액과 같다(telescoping). 평가(shaped=False)는 에피소드 끝 노이즈 경로 비용."""
         super().__init__()
+        self.shaped = shaped
         self.days, self.sim, self.labor_won = days, sim, labor_won
         self.rng = np.random.default_rng(seed)
         self.cap_mult, self.max_delay = cap_mult, max_delay
@@ -128,7 +132,17 @@ class PeakControlEnv(gym.Env):
         self.cap = max(self.plan.max() * self.cap_mult, 1.0)
         self.scale = max(self.plan.max(), 1.0)
         self.base_pw, self.base_pk = self.sim.expected(self.dd, self.plan)
+        if self.shaped:
+            self.phi = -self.sim.cost(self.dd, self.plan, None, self.labor_won)["total"] / 1000
         return self._obs(), {}
+
+    def _tentative(self):
+        """h시까지 실행분 + 대기열은 다음 시간에 + 이후는 원래 계획."""
+        p = self.done_prod.copy()
+        if self.h < 24:
+            p[self.h:] = self.plan[self.h:]
+            p[self.h] += self.backlog
+        return p
 
     def _obs(self):
         h, dd = self.h, self.dd
@@ -149,6 +163,12 @@ class PeakControlEnv(gym.Env):
         h = self.h
         self.done_prod[h], self.queue = schedule_step(h, self.plan[h], self.queue, int(action), self.cap, self.max_delay)
         self.h += 1
+        if self.shaped:
+            phi = -self.sim.cost(self.dd, self._tentative(), None, self.labor_won)["total"] / 1000
+            r, self.phi = phi - self.phi, phi
+            if self.h < 24:
+                return self._obs(), r, False, False, {}
+            return np.zeros(self.observation_space.shape, np.float32), r, True, False, {}
         if self.h < 24:
             return self._obs(), 0.0, False, False, {}
         base = self.sim.cost(self.dd, self.plan, self.noise, self.labor_won)

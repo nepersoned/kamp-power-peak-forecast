@@ -105,7 +105,7 @@ def main(timesteps=60000, labor_won=0.0):
 
     if timesteps > 0:
         from stable_baselines3 import PPO
-        tenv = PeakControlEnv(train_days, sim, labor_won=labor_won, seed=7)
+        tenv = PeakControlEnv(train_days, sim, labor_won=labor_won, seed=7, shaped=True)
         model = PPO("MlpPolicy", tenv, n_steps=24 * 64, batch_size=256, gamma=1.0, learning_rate=3e-4,
                     ent_coef=0.01, seed=0, verbose=0)
         model.learn(total_timesteps=timesteps)
