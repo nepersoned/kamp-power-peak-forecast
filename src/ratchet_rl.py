@@ -108,8 +108,20 @@ class RatchetEnv(gym.Env):
              (seen - d.floor) / 20 if seen > 0 else -2.0, bias / 20, d.floor / 200, float(d.labor[h] > 1), len(rem) / 24]
         return np.clip(np.asarray(o, np.float32), -10, 10)
 
+    def mask(self, action):
+        """행동 차단: 직전 시간에 가동했고 이번 시간 강제 처리분이 없으면 '0%(끄기)'를 50%로 바꾼다.
+        가동 중 끊김(시작 횟수 증가)을 벌점이 아니라 구조적으로 막는다. 가동 시작을 늦추는 것은 허용."""
+        h = self.h
+        if int(action) != 0 or h == 0 or self.done[h - 1] <= 0:
+            return int(action)
+        queue = list(self.queue) + ([(h, float(self.plan[h]))] if self.plan[h] > 0 else [])
+        forced = sum(a for t, a in queue if h - t >= MAX_DELAY)
+        free = sum(a for t, a in queue if h - t < MAX_DELAY)
+        return 1 if forced <= 0 and free > 0 else 0
+
     def step(self, action):
         h = self.h
+        action = self.mask(action)
         self.done[h], self.queue = schedule_step(h, self.plan[h], self.queue, int(action), self.cap, MAX_DELAY)
         self.h += 1
         if self.h < 24:
@@ -299,7 +311,7 @@ def expert_actions(env, plan):
         forced = sum(a for t, a in queue if h - t >= MAX_DELAY) if h < 23 else sum(a for _, a in queue)
         free = sum(a for t, a in queue if h - t < MAX_DELAY) if h < 23 else 0.0
         frac = (plan[h] - forced) / free if free > 1e-9 else 1.0
-        a = int(np.argmin(np.abs(FRACTIONS - np.clip(frac, 0, 1))))
+        a = env.mask(int(np.argmin(np.abs(FRACTIONS - np.clip(frac, 0, 1)))))
         obs_list.append(obs); act_list.append(a)
         obs, _, done, _, _ = env.step(a)
     return obs_list, act_list

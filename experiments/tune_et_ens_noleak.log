@@ -1,0 +1,5 @@
+ET best 10.341 {'min_samples_leaf': 3, 'max_features': 0.2875090636734374, 'max_depth': 20, 'copy_weight': 0.18244653638826241}
+lgbm_t score 10.585 | power: 10.81/10.04 | peak15: 10.94/10.55
+et_t score 10.328 | power: 10.37/9.62 | peak15: 10.98/10.34
+cat_mae score 11.911 | power: 11.53/10.87 | peak15: 14.19/11.06
+BLEND best (10.196435346041516, np.float64(0.3), np.float64(0.7), np.float64(-0.0), [np.float64(10.28), np.float64(9.58), np.float64(10.68), np.float64(10.24)])
