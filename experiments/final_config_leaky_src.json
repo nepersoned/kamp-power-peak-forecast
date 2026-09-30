@@ -1,0 +1,38 @@
+{
+ "lgbm": {
+  "objective": "huber",
+  "alpha": 21.009732036437967,
+  "n_estimators": 1000,
+  "learning_rate": 0.026157980132117228,
+  "num_leaves": 24,
+  "min_child_samples": 48,
+  "subsample": 0.966159742264757,
+  "subsample_freq": 1,
+  "colsample_bytree": 0.7180704436905129,
+  "reg_lambda": 0.13295766584135105,
+  "verbose": -1,
+  "n_jobs": 4
+ },
+ "lgbm_copy_weight": 0.2517974178917435,
+ "et": {
+  "n_estimators": 800,
+  "min_samples_leaf": 5,
+  "max_features": 0.39694055335569634,
+  "max_depth": null,
+  "n_jobs": 8,
+  "random_state": 42
+ },
+ "et_copy_weight": 0.4901141381059678,
+ "weights": {
+  "lgbm": 0.7,
+  "et": 0.2,
+  "cat_mae": 0.1
+ },
+ "valid_score": 9.171180421982477,
+ "folds": [
+  9.39,
+  8.39,
+  9.79,
+  9.11
+ ]
+}

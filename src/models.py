@@ -9,7 +9,8 @@
   regime_ens   : 최종 제안 모델. regime_lgbm 에서
                  - 가동일 타깃을 '직전 가동일 동시각 값 대비 잔차'로 학습
                  - 증강 복제일을 버리지 않고 낮은 가중치로 활용
-                 - Optuna 튜닝 LightGBM(3시드) 0.7 + ExtraTrees 0.2 + CatBoost(MAE) 0.1 앙상블
+                 - Optuna 튜닝 LightGBM(3시드)·ExtraTrees·CatBoost(MAE) 가중 앙상블 (가중치는 final_config.json;
+                   공장인원 누수 제거 후 재튜닝 결과 LightGBM 0.3 + ExtraTrees 0.7 + CatBoost 0)
                  (하이퍼파라미터·가중치는 검증 fold 2개로만 결정: experiments/ 참조)
 
 모든 모델: fit(X, y, hour, copy) / predict(X, hour).  copy = 증강 복제일 여부.
@@ -125,17 +126,24 @@ class EnsembleOn:
         w_l = np.where(c, self.cfg["lgbm_copy_weight"], 1.0)
         w_e = np.where(c, self.cfg["et_copy_weight"], 1.0)
         w_c = np.where(c, 0.3, 1.0)
+        w = self.cfg["weights"]
         self.lgbs = [lgb.LGBMRegressor(**{**self.lgb_params, "random_state": s}).fit(X, r, sample_weight=w_l)
-                     for s in self.seeds]
+                     for s in self.seeds]                     # SHAP 해석용으로 가중치와 무관하게 학습
         self.xfill = X.median()
-        self.et = ExtraTreesRegressor(**self.cfg["et"]).fit(X.fillna(self.xfill), r, sample_weight=w_e)
-        self.cat = CatBoostRegressor(loss_function="MAE", iterations=1000, learning_rate=0.05, depth=6,
-                                     random_seed=SEED, verbose=0, thread_count=4).fit(X, r, sample_weight=w_c)
+        self.et = (ExtraTreesRegressor(**self.cfg["et"]).fit(X.fillna(self.xfill), r, sample_weight=w_e)
+                   if w.get("et", 0) > 0 else None)
+        self.cat = (CatBoostRegressor(loss_function="MAE", iterations=1000, learning_rate=0.05, depth=6,
+                                      random_seed=SEED, verbose=0, thread_count=4).fit(X, r, sample_weight=w_c)
+                    if w.get("cat_mae", 0) > 0 else None)
         return self
 
     def predict_components(self, X):
-        return dict(lgbm=np.mean([m.predict(X) for m in self.lgbs], 0),
-                    et=self.et.predict(X.fillna(self.xfill)), cat_mae=self.cat.predict(X))
+        out = dict(lgbm=np.mean([m.predict(X) for m in self.lgbs], 0))
+        if self.et is not None:
+            out["et"] = self.et.predict(X.fillna(self.xfill))
+        if self.cat is not None:
+            out["cat_mae"] = self.cat.predict(X)
+        return out
 
     def predict(self, X, hour=None):
         comp = self.predict_components(X)

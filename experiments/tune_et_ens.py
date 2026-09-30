@@ -9,10 +9,15 @@ from harness import df, evaluate, fmt
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 best_lgb = json.load(open("tune_lgbm_top10.json"))[0]["params"]
-LGB_T = dict(objective="huber", alpha=best_lgb["huber_alpha"], n_estimators=best_lgb["n_estimators"],
+LGB_T = dict(objective=best_lgb["objective"], n_estimators=best_lgb["n_estimators"],
              learning_rate=best_lgb["learning_rate"], num_leaves=best_lgb["num_leaves"],
              min_child_samples=best_lgb["min_child_samples"], subsample=best_lgb["subsample"], subsample_freq=1,
              colsample_bytree=best_lgb["colsample_bytree"], reg_lambda=best_lgb["reg_lambda"], verbose=-1, n_jobs=4)
+if best_lgb["objective"] == "huber":
+    LGB_T["alpha"] = best_lgb["huber_alpha"]
+if best_lgb["objective"] == "fair":
+    LGB_T["fair_c"] = best_lgb["fair_c"]
+RESID_T = best_lgb["resid"]
 CW = best_lgb["copy_weight"]
 
 
@@ -39,7 +44,7 @@ if __name__ == "__main__":
     ET_T = dict(n_estimators=800, min_samples_leaf=bp["min_samples_leaf"], max_features=bp["max_features"],
                 max_depth=bp["max_depth"], n_jobs=8, random_state=42)
 
-    comps = {"lgbm_t": wrap(lgb_seeds(), cw=CW), "et_t": wrap(et_fp(ET_T), cw=bp["copy_weight"]),
+    comps = {"lgbm_t": wrap(lgb_seeds(), cw=CW, resid=RESID_T), "et_t": wrap(et_fp(ET_T), cw=bp["copy_weight"]),
              "cat_mae": wrap(cat_fp({**CAT0, "loss_function": "MAE"}), cw=0.3)}
     P = {}
     for n, f in comps.items():
