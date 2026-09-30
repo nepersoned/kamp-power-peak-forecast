@@ -103,8 +103,10 @@ class RegimeModel:
     def predict(self, X, hour):
         on = operating(X)
         out = np.empty(len(X))
-        out[on] = self.on_model.predict(X[on], hour[on])
-        out[~on] = hour[~on].map(self.off_profile).to_numpy()
+        if on.any():
+            out[on] = self.on_model.predict(X[on], hour[on])
+        if (~on).any():
+            out[~on] = hour[~on].map(self.off_profile).to_numpy()
         return out
 
 

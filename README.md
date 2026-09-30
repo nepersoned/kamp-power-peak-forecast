@@ -21,6 +21,13 @@ python -m src.tariff               # 한전 요금·래칫 월별 계산 (output
 python -m src.eval_conditions      # 조건별 오차, 모델 간 차이 부트스트랩 CI (outputs/conditions/)
 python -m src.decision_eval test   # 결정 기반 평가: 예측기별 MILP 계획의 실제 절감 (outputs/decision/), valid도 가능
 python -m src.run_rl --timesteps 200000   # 제어 정책 비교: 무조치·규칙·탐색·MILP·PPO (outputs/rl/), --load로 저장 모델 평가
+python -m src.stochastic_milp      # 오차 시나리오 확률 MILP (outputs/stochastic/)
+python -m src.ratchet_rl           # 래칫 합성일 강화학습(PPO), --bc로 MILP 시연 행동 복제 (outputs/ratchet_rl/)
+python -m src.metaheuristics       # GA·타부 vs MILP, --split으로 연속 분할 GA (outputs/metaheuristics/)
+python -m src.horizon              # 예측 구간(1~24시간 앞)별 성능 곡선 (outputs/horizon/)
+python -m src.rolling_origin       # 주 단위 롤링 원점 평가 (outputs/rolling/)
+python -m src.alert_threshold      # 비용 기준 래칫 위험 경보 임계값 (outputs/alert/)
+python -m src.dashboard 2021-07-19 # 운영 대시보드 예시 (outputs/dashboard/)
 pytest -q                          # 누수 감사 테스트
 ```
 
@@ -86,6 +93,13 @@ src/milp.py         래칫 인지 MILP 부하이동(OR-Tools)
 src/run_rl.py       제어 정책 비교 실행
 src/decision_eval.py    결정 기반 평가(실측 고정), 인건비 할증 시나리오
 src/eval_conditions.py  조건별 오차, 짝지은 부트스트랩
+src/stochastic_milp.py  오차 시나리오 기반 확률 MILP
+src/ratchet_rl.py   래칫 위험 강화학습(합성일, 행동 복제)
+src/metaheuristics.py   GA·타부 탐색
+src/horizon.py      예측 구간별 성능
+src/rolling_origin.py   롤링 원점 평가
+src/alert_threshold.py  비용 기준 경보 임계값
+src/dashboard.py    운영 대시보드
 tests/              누수 감사 테스트
 docs/PROGRESS.md    진행 기록과 팀 계획
 experiments/        튜닝·앙상블 실험 스크립트와 결과
