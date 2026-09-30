@@ -68,6 +68,45 @@ def labor_tradeoff(forecast, df, days, sim, coefs, labor_grid=(0, 0.5, 1, 2, 4, 
                                    "moved_share"]].mean().round(2)
 
 
+def rolling_plan(dd, fp, fk, act_pw, act_pk, sim, coefs, start_h=6, end_h=18, window=2):
+    """시간별 재최적화: h시 시작 전에 h−1시까지의 실측으로 예측 편향(최근 window시간 평균)을 보정하고,
+    실행분은 고정한 채 남은 시간을 다시 푼다. 실측은 '새 계획으로 바뀐 실제값'(실측 + 대리모형 변화분)."""
+    plan, _ = solve_day(dd, sim, coefs, base=(fp, fk))
+    for h0 in range(start_h, end_h + 1):
+        done = plan[:h0]
+        dpw = _S_numeric(plan, coefs["power"]) - _S_numeric(dd.prod, coefs["power"])
+        dpk = _S_numeric(plan, coefs["peak15"]) - _S_numeric(dd.prod, coefs["peak15"])
+        real_pw, real_pk = act_pw + dpw, act_pk + dpk          # 지금 계획대로 갔을 때의 실제(과거 부분만 관측됨)
+        lo = max(0, h0 - window)
+        pred_pw = fp + dpw; pred_pk = fk + dpk
+        b_pw = float(np.mean(real_pw[lo:h0] - pred_pw[lo:h0])) if h0 > 0 else 0.0
+        b_pk = float(np.mean(real_pk[lo:h0] - pred_pk[lo:h0])) if h0 > 0 else 0.0
+        seen = [real_pk[t] for t in range(h0) if dd.demand_band[t] > T.OFF]
+        plan, _ = solve_day(dd, sim, coefs, base=(fp + b_pw, fk + b_pk), fixed=done,
+                            demand_so_far=max(seen) if seen else 0.0)
+    return plan
+
+
+def evaluate_rolling(forecasts, df, days, sim, coefs, names):
+    rows = []
+    for dd in days:
+        act_pw = df.loc[dd.idx, "power"].to_numpy(float)
+        act_pk = df.loc[dd.idx, "peak15"].to_numpy(float)
+        base_cost = true_cost(dd, act_pw, act_pk, dd.prod, coefs)
+        for name in names:
+            fp, fk = forecasts[name]
+            plan = rolling_plan(dd, fp.reindex(dd.idx).to_numpy(float), fk.reindex(dd.idx).to_numpy(float),
+                                act_pw, act_pk, sim, coefs)
+            c = true_cost(dd, act_pw, act_pk, plan, coefs)
+            rows.append(dict(day=str(dd.day.date()), forecaster=f"{name} (시간별 재최적화)", status="rolling",
+                             mae_power=float(np.abs(fp.reindex(dd.idx).to_numpy(float) - act_pw).mean()),
+                             mae_peak=float(np.abs(fk.reindex(dd.idx).to_numpy(float) - act_pk).mean()),
+                             saving_won=base_cost["total"] - c["total"], energy_saving_won=base_cost["energy"] - c["energy"],
+                             ratchet_saving_won=base_cost["ratchet"] - c["ratchet"], oracle_saving_won=np.nan,
+                             regret_won=np.nan, moved_share=float(np.abs(plan - dd.prod).sum() / 2 / max(dd.prod.sum(), 1))))
+    return pd.DataFrame(rows)
+
+
 def evaluate(forecasts, df, days, sim, coefs):
     """forecasts: {이름: (power Series, peak15 Series)} — 테스트 시간 인덱스."""
     rows = []
@@ -149,6 +188,11 @@ def main(period="test"):
         days = [DayData(df, X, d, day_floor(q, d)) for d in pd.date_range(VAL0, TEST0, freq="D", inclusive="left")
                 if prod_day.get(d, 0) > 0 and eval_mask[df.index.get_indexer(pd.date_range(d, periods=24, freq="h"))].all()]
     res = evaluate(forecasts, df, days, sim, coefs)
+    roll = evaluate_rolling(forecasts, df, days, sim, coefs, ["regime_ens", "regime_ens+peakP75"])
+    orc = res.groupby("day")["oracle_saving_won"].first()
+    roll["oracle_saving_won"] = roll["day"].map(orc)
+    roll["regret_won"] = roll["oracle_saving_won"] - roll["saving_won"]
+    res = pd.concat([res, roll], ignore_index=True)
     (OUT / "decision").mkdir(exist_ok=True)
     res.to_csv(OUT / "decision" / f"decision_eval_days_{period}.csv", index=False, encoding="utf-8-sig")
     tab = summarize(res)

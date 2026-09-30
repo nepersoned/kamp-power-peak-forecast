@@ -52,8 +52,9 @@ def _S_numeric(p, cf):
 
 
 def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahead=12, time_limit_s=20, base=None,
-              labor_won=0.0):
-    """base=(시간별 전력, 15분최대) 예측을 직접 주면 그 예측기로 계획(결정 기반 평가용). 없으면 시뮬레이터 기대값."""
+              labor_won=0.0, fixed=None, demand_so_far=0.0):
+    """base=(시간별 전력, 15분최대) 예측을 직접 주면 그 예측기로 계획(결정 기반 평가용). 없으면 시뮬레이터 기대값.
+    fixed: 이미 실행한 시각별 생산량(길이 h0 배열) — 롤링 재최적화용. demand_so_far: 이미 찍힌 최대수요."""
     plan = dd.prod
     cap = max(plan.max() * cap_mult, 1.0)
     base_pw, base_pk = base if base is not None else sim.expected(dd, plan)
@@ -65,6 +66,9 @@ def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahe
         if plan[h] > 0:
             solver.Add(sum(x[h, k] for k in range(max_delay + 1) if (h, k) in x) == float(plan[h]))
     p = [sum(x[h, t - h] for h in range(max(0, t - max_delay), t + 1) if (h, t - h) in x) for t in H]
+    h0 = 0 if fixed is None else len(fixed)
+    for t in range(h0):
+        solver.Add(p[t] == float(fixed[t]))            # 이미 실행한 시각은 고정
     on = [solver.BoolVar(f"on{t}") for t in H]
     start = [solver.NumVar(0, 1, f"st{t}") for t in H]
     minp = 1.0
@@ -84,9 +88,9 @@ def solve_day(dd, sim, coefs, max_delay=MAX_DELAY, cap_mult=CAP_MULT, months_ahe
         return cf["gain"][t] * on[t] + cf["prev"] * prev + cf["next"] * nxt + cf["start"] * start[t] + cf["beta"] * p[t]
     power = [base_pw[t] - S0["power"][t] + S("power", t) for t in H]
     peak = [base_pk[t] - S0["peak15"][t] + S("peak15", t) for t in H]
-    D = solver.NumVar(0, solver.infinity(), "D")
+    D = solver.NumVar(float(demand_so_far), solver.infinity(), "D")
     for t in H:
-        if dd.demand_band[t] > T.OFF:
+        if dd.demand_band[t] > T.OFF and t >= h0:
             solver.Add(D >= peak[t])
     r = solver.NumVar(0, solver.infinity(), "ratchet_excess")
     solver.Add(r >= D - dd.floor)
