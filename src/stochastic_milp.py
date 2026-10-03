@@ -20,13 +20,22 @@ from .rl_env import CAP_MULT, MAX_DELAY, n_starts
 OUT = Path(__file__).resolve().parents[1] / "outputs" / "stochastic"
 
 
-def solve_stochastic(d, coefs, peak_scen, alpha=0.9, lam=0.5, months_ahead=12, time_limit_s=30):
+def solve_stochastic(d, coefs, peak_scen, alpha=0.9, lam=0.5, months_ahead=12, time_limit_s=30,
+                     return_info=False):
+    """Consume arbitrary (K,24) peak scenarios; legacy array return is preserved."""
+    peak_scen = np.asarray(peak_scen, float)
+    if peak_scen.ndim != 2 or peak_scen.shape[1] != 24 or not len(peak_scen) or not np.isfinite(peak_scen).all():
+        raise ValueError("Expected finite scenarios of shape (K,24)")
+    if not 0 < alpha < 1 or not 0 <= lam <= 1:
+        raise ValueError("Invalid CVaR parameters")
     plan = d.prod
     cap = max(plan.max() * CAP_MULT, 1.0)
     K = len(peak_scen)
     S0p = _S_numeric(plan, coefs["power"])
     S0k = _S_numeric(plan, coefs["peak15"])
     solver = pywraplp.Solver.CreateSolver("SCIP")
+    if solver is None:
+        raise RuntimeError("SCIP solver unavailable")
     H = range(24)
     x = {(h, k): solver.NumVar(0, float(plan[h]), f"x{h}_{k}") for h in H for k in range(MAX_DELAY + 1)
          if plan[h] > 0 and h + k <= 23}
@@ -67,12 +76,16 @@ def solve_stochastic(d, coefs, peak_scen, alpha=0.9, lam=0.5, months_ahead=12, t
     solver.Minimize(energy + T.BASE_RATE["II"] * months_ahead * risk)
     solver.SetTimeLimit(int(time_limit_s * 1000))
     st = solver.Solve()
+    info = dict(status={pywraplp.Solver.OPTIMAL: "optimal", pywraplp.Solver.FEASIBLE: "feasible"}.get(st, "failed"),
+                wall_time_ms=solver.wall_time(), K=K)
+    if st in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+        info.update(objective=solver.Objective().Value(), best_bound=solver.Objective().BestBound())
     if st not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
-        return plan.copy()
+        return (plan.copy(), info) if return_info else plan.copy()
     sol = np.array([sum(x[h, t - h].solution_value() for h in range(max(0, t - MAX_DELAY), t + 1) if (h, t - h) in x)
                     for t in H])
     sol[sol < 1e-3] = 0.0
-    return sol
+    return (sol, info) if return_info else sol
 
 
 def residual_paths(days):

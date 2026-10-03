@@ -113,3 +113,18 @@ experiments/        튜닝·앙상블 실험 스크립트와 결과
 - `outputs/shaving_*.csv` — 피크 저감 시뮬레이션
 - `outputs/shap_*.csv`, `outputs/dice_peak_actions.csv` — 해석 결과
 - `outputs/fig*.png` — 그림 11종
+
+## 오성민 Phase 1: joint uncertainty (TRAIN → VALID 전용)
+
+최종 목표는 BEST FORECASTER → BEST UNCERTAINTY MODEL → BEST DECISION / CONTROL POLICY다.
+Phase 1에서는 champion `regime_ens`를 실험 통제로 고정한다. 최종 forecasting model 확정은 Phase 2의 공정한 모델/앙상블 비교 후에 한다.
+
+```bash
+pip install -r requirements-phase1.txt
+python -m pytest -q
+python -m experiments.joint_scenarios --workers 4
+```
+
+이 command는 TEST를 평가하지 않는다. 결과는 `outputs/joint_uncertainty/`에 저장된다.
+Phase-1 VALID 결론은 empirical full-path 유지(K30, lambda=0)이며 새 covariance/PCA의 우월성을 주장하지 않는다.
+상세 설계·제약·재현은 [Phase-1 문서](docs/PHASE1_JOINT_UNCERTAINTY.md), 결과는 [PROGRESS §11](docs/PROGRESS.md)에 있다.

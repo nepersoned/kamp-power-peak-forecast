@@ -562,3 +562,69 @@
 - 실행: `pip install -r requirements.txt` → `python run_all.py` (CPU 약 10분)
 - 주요 파일: `src/`(데이터·피처·모델·피크·해석·그림), `experiments/`(튜닝·앙상블 실험), `outputs/`(실행 시 생성: 예측 결과, 비교표, 오류분석, 저감 시뮬레이션, SHAP·DiCE, 그림 11종)
 - 문서: `5번_팀계획.pdf`, `5번_실험노트.pdf` (저장소 밖 작업 폴더)
+
+---
+
+## 11. 오성민 Phase 1 — joint uncertainty와 decision propagation (2026-10-04)
+
+최종 연구 목표를 **BEST FORECASTER → BEST UNCERTAINTY MODEL → BEST DECISION / CONTROL POLICY**로 명확히 한다. 이번 `regime_ens` 고정은 uncertainty 효과를 분리하는 실험 통제이며 최종 forecaster 확정이 아니다. Phase 2에서는 최고의 forecasting 성능 모델/단순 앙상블을 찾는다.
+
+### Leakage와 실험 조건
+
+- TRAIN 1/8~7/15, VALID 7/16~8/15 유지. TEST 학습/평가/선택은 이번 실행에서 하지 않았다.
+- 기존 GroupKFold를 우회하고 strictly past-only expanding rolling origin으로 원본 가동일 residual을 생성했다. 원본 훈련일 14일 warm-up, 최대 14일 block, 실제 fit 종료 timestamp를 각 residual에 기록한다.
+- residual은 49일 × 24시간, 타깃별 1,176행이다. TRAIN 후보 189일에서 복제 113일, 휴무 13일, warm-up 12일, 계획 누락 2일을 제외했다. 사용 기간은 1/28~7/14, 적합 origin은 7개다. `training_end_date >= forecast_date` 위반은 0건이다. 제외 날짜 전체는 `train_day_audit.csv`에 남겼다.
+- VALID 원본 가동일 18일(7/19 제외 시 17일), 휴무 12일/복제 1일 제외. Forecaster와 surrogate를 모두 TRAIN만으로 적합했다. 테스트 이전이라도 VALID target으로 surrogate를 적합하는 기존 경로를 사용하지 않았다.
+- 기존 features/config/복제 저가중치 champion은 유지했다. 과거 champion hyperparameter의 VALID 튜닝 이력, 실측 기상을 예보로 간주하는 가정, 반사실적 surrogate 비용은 여전히 연구 한계다.
+
+### 공동 residual 구조
+
+49일은 1,176개 독립 sample이 아닌 49개 daily vector다. 시간 의존성 및 날짜 의존성 때문에 통계적 유효 표본 수를 49로 확정할 수 없다. peak15 residual의 8~23시 내부 평균 correlation은 0.879, 1~6시는 0.971, 두 구간 간 평균은 -0.174다.
+
+PCA PC1/2의 eigenvalue는 20,793.43/5,346.30 kW², 설명분산은 71.84%/18.47%(누적 90.31%)다. r=4는 95.51%, r=8은 98.32%다. PC1은 주로 8~23시 방향, PC2는 1~6시 방향, PC3는 17~19시와 20~23시 대비를 나타냈다. 이를 재가동 원인으로 단정하지 않는다. 높은 explained variance가 확률 점수나 decision 개선을 보장하지 않았다.
+
+Raw covariance condition number는 6,719.43, Ledoit–Wolf는 116.74, OAS는 256.99였다. 실제 데이터 raw 최소 eigenvalue는 3.095로 양수였고 Cholesky 실패는 없었다. 구현은 near-singular 입력에 eigenvalue floor를 적용하며 low-rank stress test를 통과했다. Shrinkage의 수치 안정성 개선이 decision 개선으로 이어지지는 않았다.
+
+### VALID 결과
+
+Empirical/independent, Cholesky 3종, PCA Gaussian/bootstrap 각각 r=2/3/4/5/6/8: 총 17개 config를 K=30/50 × seed=0/1/2에서 비교했다. 1,836개 stochastic 결정과 18개 oracle 기준선은 모두 optimal이었다. 동일 alpha=.9/lambda=0/요금/래칫/생산제약을 사용했다. Empirical은 과거의 24시간 path를 함께 추출하므로 **이미 dependence를 보존**한다.
+
+아래는 **방법 선택에 사용한 7/19 제외 VALID**, K=30, seed 평균이다. Cholesky/PCA의 표 행은 해당 family의 VALID regret가 가장 낮은 보조 대표이며 최종 채택을 뜻하지 않는다. 절감/후회/최악일 단위는 원/일, moved share는 비율이다. 17개 전체 및 K sensitivity는 `scenario_metrics_valid.csv`에 있다.
+
+| Method | CRPS | Energy | Variogram | TAU Brier | Ratchet Brier | Saving/day | Regret/day | Worst day | Moved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Empirical | 11.769 | 69.523 | 2.758 | .106 | .020 | 20,848 | 3,771 | 1,545 | .448 |
+| Independent | 12.209 | 81.524 | 4.512 | .107 | .170 | 20,971 | 3,648 | 1,545 | .496 |
+| Cholesky empirical | 13.814 | 78.950 | 2.983 | .107 | .042 | 22,846 | 1,773 | 1,545 | .439 |
+| PCA Gaussian r3 | 14.055 | 80.668 | 3.063 | .106 | .031 | 23,373 | 1,246 | 1,545 | .436 |
+| PCA bootstrap r2 | 12.030 | 70.670 | 2.797 | .113 | .010 | 23,203 | 1,416 | 1,545 | .436 |
+
+Empirical 전체 18일의 power MAE=14.262, peak15 MAE=15.104 kW이며 모든 scenario method에서 point forecast가 같으므로 MAE 순위는 모두 동률이다. Empirical q10–q90 coverage는 80.94%다. CRPS/Energy는 empirical이 가장 좋지만 regret는 PCA Gaussian r3가 가장 낮다. 이는 uncertainty의 평가 순위가 다르다는 결과이며 forecaster 간 순위 검증은 Phase 2에 남긴다.
+
+PCA Gaussian r3의 empirical 대비 절감 차이는 +2,525원/일, paired CI [124, 5,563]이지만 Energy/ratchet Brier가 악화했다. PCA bootstrap r2는 +2,355원/일, CI [-56, 5,412]로 불확실했다. Cholesky empirical은 +1,998원/일, CI [-242, 4,943]였다. 날짜 bootstrap/17개 후보 비교의 CI는 탐색적이며 multiple comparison을 엄밀히 통제한 확증 결과가 아니다.
+
+Empirical K50은 K30보다 7/19 제외 평균 +850원/일, paired CI [-326, 2,269]였다. 사전 primary K30을 유지한다. CRPS 하나로 채택하지 않으며 사전 규칙(positive paired saving CI + Energy/ratchet Brier 비악화)에 부합하는 신규 joint method가 없었다.
+
+### 7/19 포함/제외와 case study
+
+| Method (K30) | Saving incl. 7/19 | Saving excl. 7/19 | Regret incl. | Regret excl. |
+|---|---:|---:|---:|---:|
+| Empirical | 109,974 | 20,848 | 3,946 | 3,771 |
+| Independent | 110,218 | 20,971 | 3,702 | 3,648 |
+| Cholesky empirical | 112,242 | 22,846 | 1,677 | 1,773 |
+| PCA Gaussian r3 | 112,742 | 23,373 | 1,178 | 1,246 |
+| PCA bootstrap r2 | 112,582 | 23,203 | 1,338 | 1,416 |
+
+7/19은 method selection에서 제외했다. Past-only floor=206 kW, 실제 billable max=222 kW. Empirical exceedance probability는 seed별 36.7%/26.7%/40.0%(평균 34.4%), billable max P50/P75/P90/P95의 seed 평균은 197.98/213.94/241.28/255.21 kW다. Empirical 권고안의 moved share=.616, 반사실적 실현 max의 seed 평균=200.35 kW, 절감=1,625,117원, oracle=1,632,022원, regret=6,905원이었다. 계획 24시간 전체와 모든 method/seed의 분포·실현 결과를 저장했다.
+
+PCA Gaussian r3은 이 날 regret 평균 약 5원이지만 이 하루로 채택하지 않는다. PCA bootstrap r4/r5는 seed 1에서 절감 14,767원, regret 1,617,255원으로 큰 rare-event 손실 기회를 놓쳤다. Component 수가 많다고 안정적이지 않았다. VALID에서 실제 ratchet exceedance는 7/19 하나뿐이므로 제외 집합의 Brier는 false positive를 평가하며, rare-event calibration 개선을 확증할 수 없다.
+
+### 채택·기여·다음 단계
+
+- **최종 Phase-1 선택: empirical full-path bootstrap 유지, K30, lambda=0.** 새 covariance/PCA 방법의 전반적 우월성은 주장하지 않는다.
+- 본문 핵심: past-only provenance, 기존 empirical의 joint dependence, marginal/joint/event/decision의 연결과 순위 차이. PCA Gaussian r3/bootstrap r2는 보조 trade-off 실험. Shrinkage/나머지 r grid는 sensitivity appendix; independent는 dependence ablation. 개선 없는 복잡한 방법은 운영안에 채택하지 않는다.
+- 오성민 기여: 24시간 원본 OOS residual 구조를 추정하고, uncertainty representation을 공통 MILP에 연결해 실현 절감/후회와 calibration을 함께 검증했다. “새 모델이 더 우수했다”는 서사는 근거가 없으며 쓰지 않는다.
+- Phase 2 최우선은 최고의 forecasting 성능이다. 기존 6종+SARIMAX/TabPFN/가능 시 Chronos를 같은 두 validation fold·두 target MAE 평균으로 비교하고, residual diversity와 regime_ens+신규 모델의 0.1 간격 weight를 검토한다. 선택된 forecaster에 대해 residual/uncertainty를 다시 적합해야 한다. TEST는 frozen configuration 최종 평가 전까지 실행하지 않는다.
+- 전체 테스트: **22 passed**, 기존 leakage 7개 포함. SWIG import deprecation warning 3개이며 failure가 아니다. REPORT_DRAFT 본문, main, commit/push는 변경하지 않았다.
+
+상세 설계/명령은 `docs/PHASE1_JOINT_UNCERTAINTY.md`. 실행: `python -m experiments.joint_scenarios --workers 4`; 이번 실행은 rolling residual 생성 후 `--reuse-residuals --workers 4`로 VALID를 실행했고 `--summarize-only`로 파생 표를 저장했다. 환경은 `requirements-phase1.txt` 및 결과 manifest에 기록했다.

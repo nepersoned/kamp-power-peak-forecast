@@ -1,0 +1,50 @@
+{
+  "phase": 1,
+  "forecaster": "regime_ens",
+  "forecaster_final": false,
+  "method": "empirical",
+  "estimator": "empirical",
+  "rank": 4,
+  "K": 30,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "alpha": 0.9,
+  "lam": 0,
+  "selected_on": "VALID excluding 2021-07-19",
+  "test_evaluated": false,
+  "rule": "positive paired 95% saving CI + no worse Energy Score and ratchet Brier; otherwise empirical",
+  "fingerprint": "9c586c6a0d370ab8740b66581c1afc6f7ddfe83d330b925b2f2a335c8b456b85",
+  "residual_n_days": 49,
+  "train_end": "2021-07-14 23:00:00",
+  "versions": {
+    "numpy": "2.3.5",
+    "pandas": "3.0.1",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.6.0",
+    "catboost": "1.2.10",
+    "ortools": "9.15.6755",
+    "pytest": "9.1.1"
+  },
+  "base_git_sha": "e169714df03ae8b2d381853f579db4e32a49414c",
+  "commands": [
+    "python -m experiments.joint_scenarios",
+    "python -m experiments.joint_scenarios --reuse-residuals --workers 4",
+    "python -m experiments.joint_scenarios --summarize-only"
+  ],
+  "postprocess_source_hashes": {
+    "experiments/joint_scenarios.py": "5ae7fb9b3807372485ca4e0cac5a4408593e4af6ebb278aead07ac1b600c4391",
+    "src/joint_uncertainty.py": "19b833765b4fedfa0d37f1365a6afb9c805fa75c9b9cb65a3c851a8b63670510",
+    "src/probabilistic_eval.py": "8b0440e1d0a28599a0aac732ee68dc0ae65db911c241caedcfced05d4ad2834a",
+    "src/forecast_interface.py": "368d1c39869933c628f2c14677489abaddf1b3d56a3db9a01d08df33d47d3708",
+    "src/stochastic_milp.py": "878a020b2b69551f3f58f5cd2cb40783557203b81bd4b23b7ca48481cfaf6309",
+    "src/decision_eval.py": "97d71327a60cf161b307ec9e49e4ad085f3a22bba1825d54943e147829897222",
+    "src/models.py": "7b246a1b9bee543e9a8903735e349e6d983078baa6387a791b41987889e6fd74",
+    "src/features.py": "e6c0b9a27f3210633e0b734c57ae2e0dd57f1934af84f31eaac5a5b4ec61a6a7",
+    "src/data.py": "e9d75a98d4bc3b54004baedc7fdfca2a835752eaff375a2a41d8f3162a96ff5d"
+  },
+  "rank_active": false,
+  "covariance_active": false
+}

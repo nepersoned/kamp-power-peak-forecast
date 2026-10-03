@@ -23,12 +23,16 @@ RENAME = {
 Q = ["q15", "q30", "q45", "q60"]
 
 
-def load(path=RAW):
+def load(path=RAW, end=None):
     df = pd.read_csv(path).rename(columns=RENAME)
     df["hour"] = df.groupby("date_raw").cumcount()
     df["hour_corrupt"] = df["hour_raw"] != df["hour"]
     df["ts"] = pd.to_datetime(df["date_raw"].astype(str)) + pd.to_timedelta(df["hour"], unit="h")
     df = df.sort_values("ts").set_index("ts")
+    # Optional experiment cutoff precedes interpolation and duplicate detection.
+    # Default loading behavior is unchanged.
+    if end is not None:
+        df = df.loc[df.index < pd.Timestamp(end)].copy()
     assert df.index.is_unique and len(df) == 24 * df["date_raw"].nunique()
 
     # 시간 컬럼이 깨진 날은 생산량·인원도 전부 0으로 지워져 있음(정상 가동 전력인데 계획 0) -> 결측 처리

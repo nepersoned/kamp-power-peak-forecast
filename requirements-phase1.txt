@@ -1,0 +1,12 @@
+# Python 3.12; versions used for the isolated Phase-1 VALID experiment.
+# Existing requirements.txt remains the full-project environment.
+numpy==2.3.5
+pandas==3.0.1
+scipy==1.18.1
+scikit-learn==1.9.1
+lightgbm==4.6.0
+catboost==1.2.10
+ortools==9.15.6755
+gymnasium==1.3.0
+matplotlib==3.11.2
+pytest==9.1.1

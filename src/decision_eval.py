@@ -39,7 +39,9 @@ def load_external(index):
     for f in sorted(OUT.glob("forecast_dist_*.csv")):
         d = pd.read_csv(f, parse_dates=["timestamp"])
         name = f.stem.replace("forecast_dist_", "")
-        piv = d.pivot_table(index="timestamp", columns="target", values="q50")
+        # Explicit point forecasts can differ from a scenario median. Older
+        # q50-only exports remain valid.
+        piv = d.pivot_table(index="timestamp", columns="target", values="point" if "point" in d else "q50")
         if {"power", "peak15"} <= set(piv.columns):
             out[name] = (piv["power"].reindex(index), piv["peak15"].reindex(index))
     return out
