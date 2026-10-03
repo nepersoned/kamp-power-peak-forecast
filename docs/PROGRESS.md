@@ -628,3 +628,44 @@ PCA Gaussian r3은 이 날 regret 평균 약 5원이지만 이 하루로 채택�
 - 전체 테스트: **22 passed**, 기존 leakage 7개 포함. SWIG import deprecation warning 3개이며 failure가 아니다. REPORT_DRAFT 본문, main, commit/push는 변경하지 않았다.
 
 상세 설계/명령은 `docs/PHASE1_JOINT_UNCERTAINTY.md`. 실행: `python -m experiments.joint_scenarios --workers 4`; 이번 실행은 rolling residual 생성 후 `--reuse-residuals --workers 4`로 VALID를 실행했고 `--summarize-only`로 파생 표를 저장했다. 환경은 `requirements-phase1.txt` 및 결과 manifest에 기록했다.
+
+
+## 12. 오성민 Phase 2 — VALID BEST FORECASTER (2026-10-04)
+
+Phase 1은 commit a8182b8에 보존했으며 empirical full-path K30/lambda0를 변경하지 않았다. Primary=(power F1 MAE+peak15 F1 MAE+power F2 MAE+peak15 F2 MAE)/4. 기존 tuning의 두 fold [07/02,07/16), [07/16,08/16)를 유지했다. TRAIN-only parameter fit, D-1 lag/plan, 원본-copy 정책 유지. TEST를 feature 생성 전 잘랐고 신규 TEST 예측/평가를 실행하지 않았다.
+
+| model | power_mae | peak15_mae | primary_score | daily_max_peak15_mae | runtime_seconds |
+|---|---|---|---|---|---|
+| regime_tabpfn_all | 7.680 | 9.071 | 8.376 | 10.922 | 430.541 |
+| regime_ens | 9.998 | 10.483 | 10.241 | 10.060 | 28.278 |
+| regime_lgbm | 14.809 | 14.120 | 14.465 | 20.099 | 5.986 |
+| tabpfn_all | 17.679 | 18.966 | 18.323 | 25.272 | 659.252 |
+| lgbm | 22.165 | 24.429 | 23.297 | 30.168 | 7.175 |
+| regime_tabpfn_28 | 27.342 | 21.176 | 24.259 | 23.622 | 75.895 |
+| regime_tabpfn_14 | 27.503 | 21.144 | 24.324 | 23.821 | 71.412 |
+| naive_168h | 26.275 | 28.822 | 27.549 | 38.256 | 0.020 |
+| sarimax | 31.178 | 34.585 | 32.881 | 45.816 | 248.439 |
+| ridge | 33.497 | 36.349 | 34.923 | 49.455 | 0.212 |
+| naive_24h | 35.883 | 38.885 | 37.384 | 48.385 | 0.018 |
+
+최종 선택은 **regime_tabpfn_all**. Regime-TabPFN은 휴무 기존 시간별 median + 가동 public TabPFN-v2(all original history)다. VALID primary는 8.375723 vs deployed regime_ens 10.240550으로 18.21% 개선했다. 두 fold primary는 9.4009/7.3505 vs 10.4046/10.0766으로 모두 개선했다. 기존 final_config10.196435는 copy 포함 휴무 median을 사용한 legacy 튜너와 deployed 코드 차이이며, 동일 operating 예측에 legacy median을 적용해 정확히 재현했다. Champion 코드를 수정하지 않았다.
+
+Regime-TabPFN error Pearson은 fold/target별 .717–.820이다. 전체 paired date CI(candidate−champion)=[−3.752,−.295]kW, operating=[−5.062,−.861], peak-window=[−4.057,1.894]. CI는 탐색 후 비교/날짜 독립성의 한계가 있다. peak15 daily-max는10.922 vs10.060으로 악화했다. 일부 날짜는 더 나빠지므로 모든 조건의 개선을 주장하지 않는다.
+
+2-model common weight grid 최적은 champion0/TabPFN1(단독)이다. Target별 power0/peak15 .1은 8.367842로 .007881kW만 추가 개선하여 복잡성 gate .1kW에 미달했다. genuine pair improvement가 없어 3-model/Ridge stacking은 수행하지 않았다. Chronos/SimpleRNN은 낮은 우선순위와 추가 필요성 부족으로 제외했다.
+
+| week | regime_ens | regime_tabpfn_all | difference |
+|---|---|---|---|
+| 1 | 18.272 | 12.303 | -5.969 |
+| 2 | 8.769 | 7.848 | -0.920 |
+| 3 | 7.165 | 6.358 | -0.807 |
+| 4 | 2.098 | 2.098 | 0.000 |
+| 5 | 18.479 | 8.219 | -10.260 |
+
+Frozen finalists만 weekly rolling origin/원본 rows로 검증했다. 평균차이 -3.591kW, 개선 4/5주로 사전 gate를 통과했다. Context/weight를 rolling 결과로 재튜닝하지 않았다.
+
+TabPFN9.1.0, v2 pinned revision/checksum, CPU4 threads, 46 features, 4 estimators, median output/KV cache. 가동 TRAIN samples1224/1512, recent28/14는 첫 fold24개뿐이라 악화했다. Total VALID fit/predict430.5초 vs champion28.3초. SARIMAX(1,0,0)x(1,0,0,24)+10exog는4fit 모두50iteration내 nonconverged, primary32.881로 baseline만 남겼다. Package/weight 다운로드 및 offline 재현 조건은 PHASE2 문서에 기록했다.
+
+전체 pytest **29 passed**, SWIG deprecation warning3개. Phase2의 신규7개 테스트는 future/context/copy/state/schema/score/hash guard를 검증한다. main, REPORT_DRAFT, Phase1 uncertainty/MILP는 수정하지 않았다. Phase2 변경은 미커밋이며 push/merge는 실행하지 않았다.
+
+선택 명세는 experiments/forecast_model_selected.json, 상세 재현은 docs/PHASE2_FORECAST_SEARCH.md. Phase3는 make_forecaster 선택 모델로 strictly past-only residual을 새로 만들고 empirical K30/lambda0와 decision pipeline에 연결해야 한다. 기존 regime_ens residual 재사용 금지. Phase1 plan_missing 제외 fit-mask와 Phase2 legacy mask 차이를 명시적 policy로 연결해야 한다. 이번에는 Phase3/TEST를 실행하지 않았다.

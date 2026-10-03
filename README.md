@@ -128,3 +128,18 @@ python -m experiments.joint_scenarios --workers 4
 이 command는 TEST를 평가하지 않는다. 결과는 `outputs/joint_uncertainty/`에 저장된다.
 Phase-1 VALID 결론은 empirical full-path 유지(K30, lambda=0)이며 새 covariance/PCA의 우월성을 주장하지 않는다.
 상세 설계·제약·재현은 [Phase-1 문서](docs/PHASE1_JOINT_UNCERTAINTY.md), 결과는 [PROGRESS §11](docs/PROGRESS.md)에 있다.
+
+## 오성민 Phase 2: forecasting search (VALID 전용)
+
+Phase 1 empirical K30/lambda0는 동결하고, 두 validation fold·두 target MAE의 동일 비중 평균으로 forecaster를 비교한다.
+
+```bash
+pip install -r requirements-phase2.txt
+python -m pytest -q
+python -m experiments.forecast_model_search --stage base
+python -m experiments.forecast_model_search --stage tabpfn
+python -m experiments.forecast_model_search --stage analysis
+python -m experiments.forecast_model_search --stage rolling
+```
+
+결과는 `outputs/forecast_models/`, 동결한 명세는 `experiments/forecast_model_selected.json`이다. TEST 실행 option은 없다. TabPFN은 명시한 공개 v2 checkpoint를 사용하며 최초 다운로드에는 인터넷이 필요하다. Offline 환경은 검증된 파일에 `KAMP_TABPFN_MODEL_PATH`를 지정한다. [설계·라이선스·재현](docs/PHASE2_FORECAST_SEARCH.md)을 확인한다. Phase 3에서는 선택 forecaster의 past-only residual을 새로 적합해야 한다.

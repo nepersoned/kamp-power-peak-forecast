@@ -1,0 +1,84 @@
+{
+  "phase": 2,
+  "model": "regime_tabpfn_all",
+  "preliminary": false,
+  "finalists": [
+    "regime_ens",
+    "regime_tabpfn_all"
+  ],
+  "specification": {
+    "components": [
+      "regime_tabpfn_all"
+    ],
+    "weights": {
+      "power": [
+        1.0
+      ],
+      "peak15": [
+        1.0
+      ]
+    }
+  },
+  "finalist_specifications": {
+    "regime_ens": {
+      "components": [
+        "regime_ens"
+      ],
+      "weights": {
+        "power": [
+          1.0
+        ],
+        "peak15": [
+          1.0
+        ]
+      }
+    },
+    "regime_tabpfn_all": {
+      "components": [
+        "regime_tabpfn_all"
+      ],
+      "weights": {
+        "power": [
+          1.0
+        ],
+        "peak15": [
+          1.0
+        ]
+      }
+    }
+  },
+  "primary": "mean over two folds and two target hourly MAEs",
+  "folds": [
+    [
+      "2021-07-02",
+      "2021-07-16"
+    ],
+    [
+      "2021-07-16",
+      "2021-08-16"
+    ]
+  ],
+  "adoption_rule": "primary improvement >=0.05 kW; neither fold worsens >0.2 kW; rolling robustness check next",
+  "test_evaluated": false,
+  "phase1_unchanged": true,
+  "rolling_delta_mean": -3.5911252456001934,
+  "rolling_weeks_better": 4,
+  "frozen": true,
+  "three_model_status": "not run: no genuine two-model improvement",
+  "ridge_stacking_status": "not run: no additional complexity justified",
+  "seed": 42,
+  "features": 46,
+  "phase1_commit": "a8182b8b98b97ce56f03334240be071f7200da0b",
+  "tabpfn": {
+    "package": "9.1.0",
+    "model_id": "Prior-Labs/TabPFN-v2-reg",
+    "revision": "4972a65a1b30806315c6f92499959ffbfc69a673",
+    "sha256": "2ab5a07d5c41dfe6db9aa7ae106fc6de898326c2765be66505a07e2868c10736",
+    "n_estimators": 4,
+    "output_type": "median",
+    "fit_mode": "fit_with_cache",
+    "device": "cpu",
+    "threads": 4,
+    "context_days": null
+  }
+}

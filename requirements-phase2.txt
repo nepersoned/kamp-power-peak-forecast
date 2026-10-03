@@ -1,0 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements-phase1.txt
+statsmodels==0.14.6
+torch==2.14.1+cpu
+tabpfn==9.1.0
