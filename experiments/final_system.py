@@ -19,7 +19,7 @@ from src.data import load, Q
 from src.features import build
 from src.models import operating
 from src.forecast_adapters import make_forecaster
-from src.final_system import START, TEST_START, END, fit_mask, eligibility, rolling_residual_pool, validate_pool
+from src.final_system import START, TEST_START, END, fit_mask, eligibility, rolling_residual_pool, validate_pool, forecast_queries
 from src.joint_uncertainty import residual_matrix, JointResidualModel
 from src.forecast_interface import forecast_frame
 from src.probabilistic_eval import marginal_metrics, event_metrics, paired_bootstrap, reliability, pr_auc
@@ -238,23 +238,25 @@ def test():
         # alter the fitting frame. D-1 TEST history is allowed in lag features.
         df=load(end=END);X=build(df); assert list(X)==c["feature_list"]
         ev=(df.index>=TEST_START)&(df.index<END)&~df.outage.to_numpy()&X.power_lag168.notna().to_numpy()
-        index=df.index[ev];frames=[];preds={}
+        index=df.index[ev];query_days=list(forecast_queries(df.index));all_index=df.index[(df.index>=TEST_START)&(df.index<END)]
+        frames=[];preds={};all_forecasts=[]
         for name in MODELS:
             preds[name]={}
             for target in ("power","peak15"):
                 print("TEST FIXED FIT",name,target,flush=True)
                 model=make_forecaster(name).fit(Xt[mask],train.loc[mask,target],train.loc[mask,"hour"],train.loc[mask,"is_copy"])
-                pred=pd.Series(index=index,dtype=float)
-                for day in index.normalize().unique():
-                    idx=index[index.normalize()==day]
+                pred=pd.Series(index=all_index,dtype=float)
+                for idx in query_days:
                     pred.loc[idx]=model.predict(X.loc[idx],df.loc[idx,"hour"])
                 del model
                 preds[name][target]=pred
-                fr=forecast_frame(index,target,pred.to_numpy(),name);fr["q10"]=np.nan;fr["q90"]=np.nan
+                all_forecasts.append(forecast_frame(all_index,target,pred.to_numpy(),name))
+                fr=forecast_frame(index,target,pred.reindex(index).to_numpy(),name);fr["q10"]=np.nan;fr["q90"]=np.nan
                 fr["date"]=index.normalize();fr["hour"]=df.loc[index,"hour"].to_numpy();fr["actual"]=df.loc[index,target].to_numpy()
                 fr["operating"]=operating(X.loc[index]);fr["is_copy"]=df.loc[index,"is_copy"].to_numpy()
                 fr["peak_hour"]=np.isin(df.loc[index,"hour"],(8,9,10,11,13,14,15,16));fr["training_end_date"]=train.index[mask].max()
                 frames.append(fr)
+        save(pd.concat(all_forecasts,ignore_index=True),"test_day_ahead_all_hours.csv")
         forecast=pd.concat(frames,ignore_index=True);save(forecast,"test_predictions.csv")
         save(forecast[forecast.model==MODELS[1]],"test_predictions_regime_tabpfn.csv")
         save(pd.DataFrame([dict(model=n,**point_summary(g)) for n,g in forecast.groupby("model")]),"test_forecast_comparison.csv")

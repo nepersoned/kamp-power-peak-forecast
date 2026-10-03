@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from src.final_system import fit_mask, eligibility, rolling_residual_pool, validate_pool, TEST_START
+from src.final_system import fit_mask, eligibility, rolling_residual_pool, validate_pool, TEST_START, forecast_queries
 
 
 def fixture_frames():
@@ -25,6 +25,16 @@ def test_canonical_masks_are_explicitly_different():
     with pytest.raises(ValueError): fit_mask(df,X,"2021-08-17")
     df.loc["2021-06-02 01:00","outage"]=True
     assert not eligibility(df,X,"decision_evaluation","2021-06-02","2021-06-03").eligible.iloc[0]
+
+
+def test_forecast_queries_include_future_outage_hours():
+    index=pd.date_range(TEST_START,periods=48,freq="h")
+    df=pd.DataFrame({"outage":False,"power":100.},index=index)
+    df.iloc[3:10]=[True,0.]
+    queries=list(forecast_queries(df.index))
+    assert all(len(q)==24 for q in queries)
+    assert all(t in queries[0] for t in df.index[3:10])
+    with pytest.raises(ValueError):list(forecast_queries(index.delete(4)))
 
 
 def test_rolling_pool_fit_uses_only_past_and_never_test():

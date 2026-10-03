@@ -148,7 +148,7 @@ CRPS/coverage와 Energy/Variogram/event metrics는 decision-eligible 원본 가�
     text=text.replace("| `【오성민】` 가이드북 기준 모델(SimpleRNN), SARIMAX, TabPFN(·Chronos-2) | 같은 분할·같은 표로 추가 |","| **Regime-TabPFN(VALID 선정 최종)** | 가동 TabPFN-v2/휴무 original median,46개 동일 피처. SARIMAX는 baseline, 일반 TabPFN은 제외. SimpleRNN/Chronos는 미구현 |")
     text=text.replace("## 제3장.",forecast_section+"## 제3장.",1)
     text=text.replace("## 제5장.",decision_section+"## 제5장.",1)
-    text=text.replace("## 한계","최종 재현은 `docs/PHASE3_FINAL_SYSTEM.md`와 `experiments/final_system_config.json`을 따른다. 전체 pytest34 passed. TEST 실행 전 integration/config commit과 audit를 보존했다. 기존 run_all.py는 historical baseline 재현용이며 새 최종 시스템 entry point는 experiments.final_system이다.\n\n## 한계",1)
+    text=text.replace("## 한계","최종 재현은 `docs/PHASE3_FINAL_SYSTEM.md`와 `experiments/final_system_config.json`을 따른다. 전체 pytest35 passed. TEST 실행 전 integration/config commit과 audit를 보존했다. 기존 run_all.py는 historical baseline 재현용이며 새 최종 시스템 entry point는 experiments.final_system이다.\n\n## 한계",1)
     text=text.replace("## 부록","추가 한계: TabPFN pretrained prior/초기 weight 다운로드/CPU 비용, 작은 original residual sample, copy history, rare ratchet scarcity, 과거 repo의 TEST 재확인 기록, 신규 frozen TEST1회, surrogate counterfactual 및 실제 intervention 부재.\n\n## 부록",1)
     draft.write_text(text,encoding="utf-8")
     progress=ROOT/"docs/PROGRESS.md"
@@ -163,7 +163,7 @@ Branch seongmin. Phase2 commit `{config['phase2_commit']}`. Pre-TEST integration
 
 {table(pd.DataFrame(list(audit['checks'].items()),columns=['check','passed']))}
 
-Leakage violations={audit['leakage_violations']}. 전체 pytest34 passed. TEST 실행 ledger status={ledger['status']}, successful evaluation count=1, config hash=`{ledger['config_sha256']}`. TEST 기반 선택/온라인 residual 갱신 없음. D-1 history의 lag/floor 사용은 기존 문제 정의에 따라 허용된다.
+Leakage violations={audit['leakage_violations']}. 전체 pytest35 passed. TEST 실행 ledger status={ledger['status']}, successful evaluation count=1, config hash=`{ledger['config_sha256']}`. TEST 기반 선택/온라인 residual 갱신 없음. D-1 history의 lag/floor 사용은 기존 문제 정의에 따라 허용된다.
 
 ## C–E. Final TEST forecast / generalization / CI
 

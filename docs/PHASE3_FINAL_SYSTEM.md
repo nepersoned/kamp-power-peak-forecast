@@ -32,6 +32,8 @@ Before TEST, `load(end=Aug16)` precedes interpolation/features/copy detection fo
 
 Models and residual pools are fixed during TEST. D-1 TEST observations can enter future days' lag features and tariff floor history, as in the original forecasting problem; they never refit model parameters, re-estimate uncertainty or enter the residual pool. Scenario seed=`repeat_seed*100000+dayofyear`, repeats0/1/2, K30 for every method/day. Sampling full residual vectors preserves within-day dependence; no PCA/covariance selection occurs.
 
+Pre-TEST inspection corrected the inference boundary: every calendar day gets a complete24h forecast first; only scoring then excludes outage rows. Future outage labels never select query batches. This was repaired before any TEST access, without changing model/uncertainty parameters, and recorded in the freeze manifest. `test_day_ahead_all_hours.csv` retains complete forecasts including excluded scoring hours.
+
 `pretest_audit.json` records checks and pytest output. Integration code/config are committed before execution. The `test_execution.json` ledger is created before TEST data access, records the pre-TEST commit and marks completion/failure. The CLI refuses an existing ledger rather than silently repeating TEST. A failure requires a documented bug/environment repair; a poor metric never permits rerunning or tuning.
 
 ## Evaluation and limits

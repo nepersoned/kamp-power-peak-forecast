@@ -111,8 +111,8 @@
   "selected_phase1_sha256": "2b0d6ac2ddec8fdb5c73c2beac03201670ccb875202920308cb9341df853c49b",
   "selected_phase2_sha256": "b19bf384c9717aa529b2719de1b6a6c85cff5d1688ab490647b8c7e87727d7c7",
   "source_hashes": {
-    "experiments/final_system.py": "57e72053921a59fa26e0279f28df12ac3fa42e5e710a1dcfa0a833b07481cb6c",
-    "src/final_system.py": "554270a942fd5665541f4d766e69b3daab893d6948fe5f9c5644488da21a1430",
+    "experiments/final_system.py": "f98d254fb7a9b70f11baddedfbbbb020fb458d87f4cc5914a29a533c3a72aaff",
+    "src/final_system.py": "184b6db15ccfd5e977b39d6f55b6e3d772f24e8e1e3fad4683993cdef9d429f1",
     "src/forecast_adapters.py": "6743f501441691c54732bfeb849cc2e8d6a5b2f20d649654ffecdc7c6634f425",
     "src/tabpfn_model.py": "eb0ea02f7dd78f811b4dbd35b5ccf95cb3def0ad458bb0b192ac99a176b880d5",
     "src/models.py": "a73de077cd1e68096b1f77056eaf3de2f28435b02f040bc61f1f88eec05372b4",
@@ -140,5 +140,12 @@
     "ortools": "9.15.6755",
     "pytest": "9.1.1"
   },
-  "frozen_before_test": true
+  "frozen_before_test": true,
+  "pretest_repairs": [
+    {
+      "reason": "Forecast complete calendar 24h before applying outage scoring mask; no future outage-dependent query selection",
+      "test_started": false,
+      "tuning": false
+    }
+  ]
 }

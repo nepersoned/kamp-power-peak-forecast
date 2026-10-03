@@ -13,6 +13,15 @@ TEST_START = "2021-08-16"
 END = "2021-09-15"
 
 
+def forecast_queries(index, start=TEST_START, end=END):
+    """Queries depend only on calendar, never future outage/target labels."""
+    idx = index[(index >= pd.Timestamp(start)) & (index < pd.Timestamp(end))]
+    for day in idx.normalize().unique():
+        daily = idx[idx.normalize() == day]
+        if len(daily) != 24: raise ValueError("Forecast query must cover complete 24h")
+        yield daily
+
+
 def fit_mask(df, X, cutoff):
     if pd.Timestamp(cutoff) > pd.Timestamp(TEST_START):
         raise ValueError("No TEST labels may enter fitting")
