@@ -669,3 +669,90 @@ TabPFN9.1.0, v2 pinned revision/checksum, CPU4 threads, 46 features, 4 estimator
 전체 pytest **29 passed**, SWIG deprecation warning3개. Phase2의 신규7개 테스트는 future/context/copy/state/schema/score/hash guard를 검증한다. main, REPORT_DRAFT, Phase1 uncertainty/MILP는 수정하지 않았다. Phase2 변경은 미커밋이며 push/merge는 실행하지 않았다.
 
 선택 명세는 experiments/forecast_model_selected.json, 상세 재현은 docs/PHASE2_FORECAST_SEARCH.md. Phase3는 make_forecaster 선택 모델로 strictly past-only residual을 새로 만들고 empirical K30/lambda0와 decision pipeline에 연결해야 한다. 기존 regime_ens residual 재사용 금지. Phase1 plan_missing 제외 fit-mask와 Phase2 legacy mask 차이를 명시적 policy로 연결해야 한다. 이번에는 Phase3/TEST를 실행하지 않았다.
+
+
+## 13. Phase 3 frozen final evaluation
+
+### 2.6 오성민: 동결한 Regime-TabPFN 최종 평가
+
+최종 모델은 TEST를 보기 전에 VALID 두 fold·두 target MAE 평균으로 선택했다. Primary10.241→8.376(18.21%), fold별10.405→9.401/10.077→7.351, 원본 weekly rolling5주 중4주 개선/1주 동률이었다. 단순 weighted ensemble의 추가 이득은 사실상 없었다. 일반 TabPFN은 휴무를 포함한 Fold2에서 실패했고 SARIMAX는 nonconverged baseline으로만 보존했다. Chronos/SimpleRNN/stacking은 구현했다고 주장하지 않는다.
+
+가동일은 original-history TabPFN-v2, 휴무일은 기존 시간별 median을 사용한다. 46개 피처, estimator4/median/cache/CPU4 threads/seed42, checkpoint revision 및 hash를 고정했다. TEST 이후 모델/weight/feature/uncertainty/제약을 변경하지 않았다.
+
+| model | valid_primary | power_mae | peak15_mae | daily_max_mae | peak_hour_mae | primary_score |
+|---|---|---|---|---|---|---|
+| regime_ens | 10.241 | 6.225 | 7.229 | 8.605 | 8.047 | 6.727 |
+| regime_tabpfn_all | 8.376 | 5.760 | 6.745 | 7.193 | 8.147 | 6.252 |
+
+VALID와 TEST는 구간 난이도가 다르므로 절대 score끼리 직접 일반화 정도를 판단하지 않고 동일 TEST의 두 모델 차이를 비교한다. TEST primary 상대 개선=7.05%. VALID 선택 모델은 결과와 관계없이 Regime-TabPFN으로 유지한다.
+
+| subset | mae_difference | ci_low | ci_high | n_days |
+|---|---|---|---|---|
+| overall | -0.457 | -1.170 | 0.190 | 30 |
+| operating | -0.528 | -1.315 | 0.233 | 26 |
+| peak_sensitive | 0.099 | -1.104 | 1.289 | 30 |
+
+날짜 단위 paired CI5000회(seed42). Negative difference는 선택 모델의 개선이다. TEST의 CI는 결과 불확실성 설명이며 모델 재선택에 사용하지 않는다. 이 CI는 날짜를 동일 비중으로 평균하므로 일부 outage 시간이 제외된 날 때문에 hourly aggregate difference와 약간 다를 수 있다. 그림 `outputs/final_system/fig_test_daily_errors.png`.
+
+### 4.5 오성민: 최종 forecasting → joint uncertainty → decision 연결
+
+Phase1 empirical full-path/K30/lambda0는 그대로 유지했다. 두 forecaster의 residual을 같은 pre-TEST 원본 가동일·past-only origins에서 각각 새로 생성했다. 기존 champion residual을 새 모델에 재사용하지 않았다. TRAIN plan_missing은 Phase2 규칙대로 fitting에 포함하지만 residual/decision은 유효한 생산계획의 완전24h 원본 가동일만 평가한다. TEST actual은 fitting/residual pool에 들어가지 않으며 TEST 동안 pool 갱신도 없다.
+
+| model | target | n_days | start | end | bias | mae |
+|---|---|---|---|---|---|---|
+| regime_ens | peak15 | 67 | 2021-01-28 | 2021-08-14 | -1.919 | 19.572 |
+| regime_ens | power | 67 | 2021-01-28 | 2021-08-14 | -1.830 | 18.192 |
+| regime_tabpfn_all | peak15 | 67 | 2021-01-28 | 2021-08-14 | -6.825 | 18.524 |
+| regime_tabpfn_all | power | 67 | 2021-01-28 | 2021-08-14 | -4.918 | 17.877 |
+
+| model | crps | power_crps | energy_score | variogram_score | tau_brier | ratchet_brier | coverage | interval_width | pinball |
+|---|---|---|---|---|---|---|---|---|---|
+| regime_ens | 6.989 | 6.338 | 43.702 | 1.764 | 0.060 | 0.017 | 0.947 | 55.009 | 3.358 |
+| regime_tabpfn_all | 6.660 | 5.939 | 42.811 | 1.563 | 0.071 | 0.005 | 0.873 | 51.544 | 3.235 |
+
+CRPS/coverage와 Energy/Variogram/event metrics는 decision-eligible 원본 가동일 peak15 중심이다(power CRPS 별도). 보고값은3개 사전 고정 seed의 날짜별 평균이다. Q10–Q90은 empirical scenario quantile이며 conformal guarantee가 아니다.
+
+| system | n_days | saving_won | oracle_saving_won | regret_won | worst_day_saving | negative_saving_days | moved_share | energy_saving_won | ratchet_saving_won |
+|---|---|---|---|---|---|---|---|---|---|
+| regime_ens + empirical stochastic | 25 | 9,323.214 | 10,105.509 | 782.295 | 2,258.904 | 0 | 0.367 | 9,323.214 | 0.000 |
+| regime_tabpfn_all + empirical stochastic | 25 | 9,538.963 | 10,105.509 | 566.546 | 2,258.904 | 0 | 0.367 | 9,538.963 | 0.000 |
+| regime_tabpfn_all + point deterministic | 25 | 10,105.509 | 10,105.509 | 0.000 | 2,258.904 | 0 | 0.337 | 10,105.509 | 0.000 |
+
+| metric | difference | ci_low | ci_high | n_days |
+|---|---|---|---|---|
+| saving_won | 215.749 | -525.351 | 1,080.519 | 25 |
+| regret_won | -215.749 | -1,080.519 | 525.351 | 25 |
+
+판단: **forecasting 개선, decision 차이는 CI로 확정할 수 없음**. B−A saving 차이=215.7원/일. Ratchet event는 0일/25일이다. Ratchet floor가 이미 높게 정해진 TEST에서는 TOU 절감과 rare ratchet 회피를 구분해야 한다. 7/19은 기존 VALID 사례이며 이 TEST 표와 섞거나 다시 튜닝하지 않았다.
+
+```mermaid
+flowchart TD
+    A[D-1 available information] --> B[Operating regime detection]
+    B --> C[Regime-TabPFN]
+    C --> D[24h power / peak15 forecasts]
+    D --> E[Past-only empirical residual paths]
+    E --> F[30 joint scenarios]
+    F --> G[Stochastic MILP]
+    G --> H[Production schedule recommendation]
+    H --> I[Tariff / ratchet counterfactual cost evaluation]
+```
+
+이 절감은 실제 공장 intervention 결과가 아니라 실측 baseline+linear surrogate change에 기반한다. Forecast MAE가 낮아도 plan/regret 순위가 같다는 보장은 없다. 추천안과3seed별 결과는 production plans/daily decisions CSV, 그림은 `fig_test_decision_savings.png`, `fig_final_pipeline.png`에 있다.
+
+### 최종 확인 / 구조적 해석
+
+추가 해석: TEST에서 power5.760/peak15 6.745kW로 표본 MAE가 낮았지만 point 차이 CI는0을 포함한다. Peak-hour는8.047→8.147로 악화했다. Daily-max는8.605→7.193으로 낮았다. 숫자상 A/B의 forecast MAE 및 stochastic regret 순위는 모두 B가 앞서지만, 확정적인 개선을 뒷받침하는 CI는 없다.
+
+25개 decision일의 floor는 모두222kW, 실제 ratchet 초과는0건이다. Ratchet Brier 감소는 이 구간에서 false-positive 위험을 덜 냈다는 의미이며 tail-event recall 개선을 입증하지 못한다. TAU Brier는.0604→.0711로 악화했고 TAU PR-AUC는.2498→.2901로 높아져 calibration/ranking의 trade-off가 있다. 두 model의 coverage는94.72%/87.28%(nominal80%), width55.01/51.54kW다.
+
+Point-only deterministic reference는 이번 TEST에서 oracle과 같은10,106원/일 절감(regret0)으로 stochastic 선택 시스템9,539원/일(regret567)보다 높았다. Stochastic B−A 평균+216원/일은CI[−525,+1,081]로 차이를 확정할 수 없다. 정책은 TEST로 재선택하지 않는다. Forecast power는 solver의 계획에 대한 상수항이며 공통 surrogate가 TOU 계획 반응을 결정한다. Forecast 차이는 주로 peak15 시나리오/ratchet 위험으로 전달된다. 무사건 기간에서는 empirical uncertainty의 보수성이 기회비용을 만들 수 있다.
+
+희귀사건 질문은 TEST에 사건이 없어 답할 수 없다. 7/19은 Phase1의 별도 VALID 사례로 보존했으며 새로운 final TEST 평가나 새 모델의 rare-event 우월성 증거로 사용하지 않았다. 원본 context가 작은 초기 모델부터 최종 context까지 섞인 empirical residual pool의 비정상성도 한계다.
+
+실제 TEST fitting은 공통5280행; selected TabPFN 가동 original1944행/휴무 median original600행이었다. Forecaster는 각 target720시간(30일)의 완전한 query를 예측했고 score에는 non-outage703행을 사용했다. Decision 제외일은8/22,8/28,8/29,9/5,9/12이다. 위 eligibility 요약은 두 model의 동일 날짜를 중복 집계하지 않았다.
+
+최종 pytest35 passed(12.88초), SWIG deprecation3 warnings. TEST 이후 code/config/pool hashes unchanged. Phase3 평가 완료 당시 미커밋 변경은 README.md, docs/PROGRESS.md, docs/REPORT_DRAFT.md뿐이었다. 당시 main unchanged; no push/merge/rebase/force push. Pre-TEST에는 full-day query mask 오류를 수정했으나 TEST 실패·재실행은 없었다.
+
+### 최종 문서 / forecasting handoff 배포 (2026-10-04)
+
+사용자 승인에 따라 Phase1~3 최종 결과 문서와 `docs/FORECAST_MODEL_HANDOFF.md`를 검토해 documentation commit으로 묶고, 원격 ancestry 확인 후 `seongmin`의 fast-forward push를 진행한다. Handoff에는 동결 모델/checkpoint, VALID/TEST 결과와 CI, 모델별 past-only residual 규칙, forecast/scenario interface, decision 트랙 연결 및 재현 명령을 기록했다. 이번 단계는 문서 배포이며 모델·설정·TEST 결과를 변경하거나 평가를 재실행하지 않는다. `outputs/`와 pretrained weights는 Git 추적 대상이 아니므로 새 환경에서는 재현 명령과 pinned checkpoint를 사용한다. Main merge/rebase/force push는 수행하지 않는다.

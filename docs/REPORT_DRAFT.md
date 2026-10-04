@@ -18,8 +18,8 @@
 
 **내용 요약**
 
-- 데이터 진단에서 **257일 중 115일이 증강 복제일**이고, `공장인원`이 전력으로 역산되는 **타깃 누수 열**임을 찾아 제거했다. 무작위 교차검증은 오차를 약 32% 과소평가하므로 원본 구간 시간순 검증만 사용했다.
-- 생산계획으로 가동일/휴무일을 먼저 나누는 **레짐 전환 앙상블**로 하루 전 시간별 전력을 예측했다. 휴무 주간이 포함된 검증 구간에서 단일 LightGBM 대비 MAE 29.9 → 9.8, 평상 운전 테스트에서 전주 동일시각 대비 8.3 → 6.2이다. 주 단위 롤링 평가 10회 중 6회 1위.
+- 데이터 진단에서 **257일 중 115일이 증강 복제일**이고, `공장인원`이 전력으로 역산되는 **타깃 누수 열**임을 찾아 제거했다. 무작위 교차검증은 오차를 약 32% 과소평가했다. 시간순 검증과 원본-only sensitivity를 사용했고, Phase2 primary는 기존 harness와 동일하게 복제일을 포함했다.
+- 최종 forecaster는 **Regime-TabPFN**이다. 동일 VALID 두 fold·두 target primary MAE가 기존 champion10.241→8.376(18.21%) 개선되어 TEST 전에 선정했다. 동결한 TEST primary 상대 개선은 7.05%이며 결과·CI와 한계는2.6절에 분리했다.
 - 피크는 **전일 가동일의 주간조 시간**에 발생하고 기온과는 무관했다(상관 0.02). 한전 요금 구조를 반영하면 가장 큰 피크 시간(08시)은 경부하라 기본요금과 무관하고, 7월 한 번의 피크(7/19 11시 222kW)가 **래칫**으로 향후 12개월 기본요금을 결정한다(약 163만 원).
 - 예측 오차 시나리오를 함께 고려하는 **래칫 인지 확률 MILP**로 생산을 최대 2시간 이동하는 계획을 세우면, 7월에는 7/19 래칫 갱신을 피해 하루 평균 11.2만 원(완전 예측의 96%), 평상시에는 하루 약 8~9천 원의 전력량요금을 줄인다. 강화학습·유전 알고리즘·타부 탐색도 같은 조건에서 비교했으나 MILP가 모든 조건에서 우세했다.
 - 운영안: **전날 저녁 위험도 경보 + 권고 생산계획 → 당일 1시간 앞 예측으로 보정**. 요금 선택(Ⅱ가 최적), 소형 ESS(22kW/11kWh로 연 약 220만 원 기본요금 절감 가능) 판단 근거를 함께 제시한다.
@@ -42,7 +42,7 @@
 
 | 발견 | 근거 | 처리 |
 |---|---|---|
-| **증강 복제일** | 257일 중 **115일**이 앞선 날짜와 15분 수요 96값이 완전히 같다. 1~6월 대부분(1·4월 날짜가 원본), 7월 이후는 7/30(= 7/28 사본) 하나뿐. 일요일에 평일 곡선이 복사된 날도 있다 | 평가는 원본 구간만. 학습에서는 복제일을 제외하거나 낮은 가중치(0.18~0.7, 검증으로 결정) |
+| **증강 복제일** | 257일 중 **115일**이 앞선 날짜와 15분 수요 96값이 완전히 같다. 1~6월 대부분(1·4월 날짜가 원본), 7월 이후는 7/30(= 7/28 사본) 하나뿐. 일요일에 평일 곡선이 복사된 날도 있다 | 새 residual·decision 평가는 원본만, Phase2 forecasting primary는 legacy copy 포함(원본-only 보조). 학습에서는 복제일을 제외하거나 낮은 가중치(0.18~0.7, 검증으로 결정) |
 | **타깃 누수 열** | `공장인원 = 생산량 ÷ (그 시간 15분 수요 4개의 합)`이 6,151행 전부에서 오차 4.9×10⁻⁹로 성립. 생산량과 인원을 알면 그 시간 전력이 역산된다. `평균`도 15분 값 평균(반올림)과 전 행 일치 | 공장인원과 파생 피처를 모두 제거. 제거 전 성능은 부풀려져 있었다(검증 MAE 8.6 → 제거 후 12.6, 레짐 LightGBM) |
 | **시간 컬럼 손상** | 7/13·7/15 48행: `시간` 값이 전력값으로 덮이고(상관 0.91) 생산량·인원도 0으로 지워짐 | 모든 날짜가 정확히 24행이고 정상 행에서 시간 = 일내 순번이 100% 일치 → 순번으로 복원, 생산계획은 결측 처리 |
 | 정전·전면휴무 | 8/28~29 전력 0 (17시간) | 학습·평가 제외 |
@@ -89,12 +89,12 @@
 | Ridge | 선형 회귀 |
 | LightGBM 단일 | 모든 날을 하나의 모델로 |
 | 레짐 전환 LightGBM | 생산계획으로 가동일/휴무일을 먼저 판별. 가동일 = LightGBM(L1), 휴무일 = 시간대별 중앙값 기저부하(원본 휴무일 13일뿐이라 학습형 모델이 과적합) |
-| **레짐 전환 앙상블(최종)** | 가동일 타깃을 "직전 가동일 같은 시각 값 대비 잔차"로 학습, 복제일 저가중, LightGBM(L1, 3시드) 0.3 + ExtraTrees 0.7. 하이퍼파라미터·가중치는 두 검증 fold(7/2~7/15, 7/16~8/15)로만 결정(Optuna) |
-| `【오성민】` 가이드북 기준 모델(SimpleRNN), SARIMAX, TabPFN(·Chronos-2) | 같은 분할·같은 표로 추가 |
+| **레짐 전환 앙상블(기존 baseline)** | 가동일 타깃을 "직전 가동일 같은 시각 값 대비 잔차"로 학습, 복제일 저가중, LightGBM(L1, 3시드) 0.3 + ExtraTrees 0.7. 하이퍼파라미터·가중치는 두 검증 fold(7/2~7/15, 7/16~8/15)로만 결정(Optuna) |
+| **Regime-TabPFN(VALID 선정 최종)** | 가동 TabPFN-v2/휴무 original median,46개 동일 피처. SARIMAX는 baseline, 일반 TabPFN은 제외. SimpleRNN/Chronos는 미구현 |
 
 피처: 달력·공휴일, 시차(24·48·168시간), 직전 가동일 같은 시각 값, 생산계획(시간·일 생산량, ±1시간 평균, 가동 시작·종료 시각, 야간조, 운전 레짐), 기상.
 
-### 2.3 결과 (MAE, 동일 조건)
+### 2.3 기존 baseline 실험 기록 (최종 frozen 비교는 2.6절)
 | 모델 | 검증 전력 | 검증 15분최대 | 테스트 전력 | 테스트 15분최대 | 테스트 일최대 |
 |---|---|---|---|---|---|
 | 전일 같은 시각 | 30.55 | 33.63 | 36.66 | 40.04 | 51.17 |
@@ -128,25 +128,48 @@
 - 예측 오차의 바닥: 1시간 전 실측까지 입력해도 테스트 MAE 6.16, 한 시간 안 15분 값 편차 평균 6.1 → 평상시 오차는 거의 노이즈 수준.
 
 ### 2.4 피크 위험 판정(분류 관점, F1)
+이 절의 경보 임계값·분류기·P90 컨포멀 결과는 기존 baseline 실험이다. 새 Regime-TabPFN의 empirical uncertainty에는 이 보정을 옮기거나 TEST 이후 새로 적합하지 않았다. 새 시스템의 확률 결과는 4.5절에 별도로 기록한다.
+
 평가표의 "이상 확률·F1"을 "목표수요(15분 수요 ≥ 190kW, 원본 기간 상위 5%) 초과"로 대응시켰다. 판정 임계값은 검증 구간에서만 결정.
 
 | 일 단위 초과일 판정(테스트 30일 중 14일) | F1 | 재현율 | PR-AUC |
 |---|---|---|---|
 | 규칙: 평일 가동 주간이면 경보 | 0.743 | 0.93 | 0.61 |
 | 전일 실측 | 0.316 | 0.21 | 0.49 |
-| **예측 일최대(최종 모델)** | **0.778** | **1.00** | **0.73** |
+| **예측 일최대(기존 baseline)** | **0.778** | **1.00** | **0.73** |
 | 전용 분류기(등위 보정 확률) | 0.692 | 0.64 | 0.65 |
 
 - 시간 단위 판정은 F1 0.38(정밀도 0.25)이 최선. 평일 일최대가 모두 183~204kW에 몰려 190이 분포 한가운데 걸리기 때문(3장).
 - 불확실성: P90 상한의 실제 포함률 86% → 분할 컨포멀 보정 후 96%. `【오성민: 적응형 컨포멀(ACI), 분위수 예측 CRPS 비교】`
 
-### 2.5 최종 모델 선택 이유
-1. 검증·테스트·롤링 평가 모두에서 가장 낮은 오차(롤링 10주 중 6주 1위)
+### 2.5 기존 baseline의 설계 근거 (최종 선택은 2.6절)
+1. 기존 비교에서 낮은 오류를 보였던 champion baseline이다. 최종 모델은 두 VALID fold만으로 새로 선택했으며 TEST를 선택에 사용하지 않는다.
 2. 휴무·재가동 같은 운전 상태 전환에서 무너지지 않음(하계휴가 주간 MAE 1.8 vs 단일 LightGBM 78.9)
 3. 결정 가치: 7월(래칫 민감 구간)에 이 예측으로 세운 계획이 다른 예측기보다 하루 39% 더 절감(4장)
 4. 일최대 수요 MAE만은 단일 LightGBM이 더 낮다 — 일 단위 경보에는 보완적으로 사용 가능
 
 ---
+
+### 2.6 오성민: 동결한 Regime-TabPFN 최종 평가
+
+최종 모델은 TEST를 보기 전에 VALID 두 fold·두 target MAE 평균으로 선택했다. Primary10.241→8.376(18.21%), fold별10.405→9.401/10.077→7.351, 원본 weekly rolling5주 중4주 개선/1주 동률이었다. 단순 weighted ensemble의 추가 이득은 사실상 없었다. 일반 TabPFN은 휴무를 포함한 Fold2에서 실패했고 SARIMAX는 nonconverged baseline으로만 보존했다. Chronos/SimpleRNN/stacking은 구현했다고 주장하지 않는다.
+
+가동일은 original-history TabPFN-v2, 휴무일은 기존 시간별 median을 사용한다. 46개 피처, estimator4/median/cache/CPU4 threads/seed42, checkpoint revision 및 hash를 고정했다. TEST 이후 모델/weight/feature/uncertainty/제약을 변경하지 않았다.
+
+| model | valid_primary | power_mae | peak15_mae | daily_max_mae | peak_hour_mae | primary_score |
+|---|---|---|---|---|---|---|
+| regime_ens | 10.241 | 6.225 | 7.229 | 8.605 | 8.047 | 6.727 |
+| regime_tabpfn_all | 8.376 | 5.760 | 6.745 | 7.193 | 8.147 | 6.252 |
+
+VALID와 TEST는 구간 난이도가 다르므로 절대 score끼리 직접 일반화 정도를 판단하지 않고 동일 TEST의 두 모델 차이를 비교한다. TEST primary 상대 개선=7.05%. VALID 선택 모델은 결과와 관계없이 Regime-TabPFN으로 유지한다.
+
+| subset | mae_difference | ci_low | ci_high | n_days |
+|---|---|---|---|---|
+| overall | -0.457 | -1.170 | 0.190 | 30 |
+| operating | -0.528 | -1.315 | 0.233 | 26 |
+| peak_sensitive | 0.099 | -1.104 | 1.289 | 30 |
+
+날짜 단위 paired CI5000회(seed42). Negative difference는 선택 모델의 개선이다. TEST의 CI는 결과 불확실성 설명이며 모델 재선택에 사용하지 않는다. 이 CI는 날짜를 동일 비중으로 평균하므로 일부 outage 시간이 제외된 날 때문에 hourly aggregate difference와 약간 다를 수 있다. 그림 `outputs/final_system/fig_test_daily_errors.png`.
 
 ## 제3장. 영향요인 및 오류분석 〔15점〕
 
@@ -161,12 +184,14 @@
 - **요금 관점**: 15분 수요 190 이상 시간의 **29%(73/253)는 요금상 경부하(08시)**라 기본요금과 무관. 기본요금에 반영되는 피크는 10~11시·13~16시.
 
 ### 3.2 주요 영향변수와 상호작용
+이 절의 SHAP·DiCE는 기존 tree ensemble의 해석이다. Regime-TabPFN의 attribution을 계산한 결과로 표현하지 않는다.
+
 (그림 fig5 SHAP 중요도, fig8 요약, fig9 의존도, fig10 상호작용 — 가동일 15분 최대수요, 오프셋 포함 정확 분해)
 - 상위: 직전 가동일 같은 시각 피크·전력 → 가동 종료 이후 여부 → 전주 같은 시각 → 생산량(±1시간 평균) → 휴무 여부 → 가동 종료 시각.
 - 상호작용 상위: 휴무 × 가동 종료 이후(3.80), 전주 피크 × 직전 가동일 전력(1.34), 시각 × 직전 가동일 피크(1.11), 월 × 생산량(0.98).
 - **생산량 자체는 약한 레버**: DiCE 반사실로 예측 ≥ 185kW인 테스트 4시간을 목표수요 아래로 내리려면 해당 시간 생산을 중앙값 90% 줄여야 한다. 전력은 생산량보다 **가동 여부와 가동 시각**에 반응한다(4장 설계 근거).
 
-### 3.3 모델이 잘 작동하는 조건과 실패하는 조건 (전력 MAE, 최종 모델)
+### 3.3 기존 baseline이 잘 작동하는 조건과 실패하는 조건 (전력 MAE)
 | 조건 | 검증 | 테스트 | 해석 |
 |---|---|---|---|
 | 휴무일 | 1.7 | 1.0 | 레짐 구조로 거의 완벽 |
@@ -200,7 +225,7 @@
 4. 운영자 대시보드(그림 dashboard) 확인 후 채택/수정
 5. **당일**: 1시간 앞 예측으로 오차를 보정하며 진행(2.1절, 운전 상태 전환 시 오차 40% 감소)
 
-### 4.3 기대 효과 (실측 고정 평가, 모델 기반 추정)
+### 4.3 기존 시스템의 기대 효과 기록 (신규 TEST 통합 결과는 4.5절)
 평가 방식: 전력(새 계획) = 실측 + 대리모형 변화분(시간대별 가동 이득·시동 효과·생산량). 결과는 실측이 아니라 **추정**이다.
 
 | 정책 (하루 절감, 클수록 좋음) | 7월(래칫 민감) | 7/19 | 8~9월(래칫 고정) |
@@ -208,7 +233,7 @@
 | 무조치 | 0 | 0 | 0 |
 | MILP, 평균 예측 | 16,804원 | −151,899원 | 9,269원 |
 | MILP, P75 상한 | 24,050원 | −21,465원 | 9,269원 |
-| **확률 MILP(최종)** | **111,707원** | **+1,634,756원** | **8,241원** |
+| **확률 MILP(기존 실험)** | **111,707원** | **+1,634,756원** | **8,241원** |
 | 완전 예측(상한) | 116,062원 | +1,634,756원 | 9,269원 |
 
 - 8~9월에는 절감이 전부 **최대부하 → 중간·경부하 전력량요금 이동**(하루 약 8~9천 원, 월 22일 가동 시 약 18~20만 원).
@@ -225,6 +250,51 @@
 | 현실성 한계 | 권고안이 점심(12시)에 생산을 넣는 경우가 있어 교대·휴게 운영 조정이 필요할 수 있음 |
 
 ---
+
+### 4.5 오성민: 최종 forecasting → joint uncertainty → decision 연결
+
+Phase1 empirical full-path/K30/lambda0는 그대로 유지했다. 두 forecaster의 residual을 같은 pre-TEST 원본 가동일·past-only origins에서 각각 새로 생성했다. 기존 champion residual을 새 모델에 재사용하지 않았다. TRAIN plan_missing은 Phase2 규칙대로 fitting에 포함하지만 residual/decision은 유효한 생산계획의 완전24h 원본 가동일만 평가한다. TEST actual은 fitting/residual pool에 들어가지 않으며 TEST 동안 pool 갱신도 없다.
+
+| model | target | n_days | start | end | bias | mae |
+|---|---|---|---|---|---|---|
+| regime_ens | peak15 | 67 | 2021-01-28 | 2021-08-14 | -1.919 | 19.572 |
+| regime_ens | power | 67 | 2021-01-28 | 2021-08-14 | -1.830 | 18.192 |
+| regime_tabpfn_all | peak15 | 67 | 2021-01-28 | 2021-08-14 | -6.825 | 18.524 |
+| regime_tabpfn_all | power | 67 | 2021-01-28 | 2021-08-14 | -4.918 | 17.877 |
+
+| model | crps | power_crps | energy_score | variogram_score | tau_brier | ratchet_brier | coverage | interval_width | pinball |
+|---|---|---|---|---|---|---|---|---|---|
+| regime_ens | 6.989 | 6.338 | 43.702 | 1.764 | 0.060 | 0.017 | 0.947 | 55.009 | 3.358 |
+| regime_tabpfn_all | 6.660 | 5.939 | 42.811 | 1.563 | 0.071 | 0.005 | 0.873 | 51.544 | 3.235 |
+
+CRPS/coverage와 Energy/Variogram/event metrics는 decision-eligible 원본 가동일 peak15 중심이다(power CRPS 별도). 보고값은3개 사전 고정 seed의 날짜별 평균이다. Q10–Q90은 empirical scenario quantile이며 conformal guarantee가 아니다.
+
+| system | n_days | saving_won | oracle_saving_won | regret_won | worst_day_saving | negative_saving_days | moved_share | energy_saving_won | ratchet_saving_won |
+|---|---|---|---|---|---|---|---|---|---|
+| regime_ens + empirical stochastic | 25 | 9,323.214 | 10,105.509 | 782.295 | 2,258.904 | 0 | 0.367 | 9,323.214 | 0.000 |
+| regime_tabpfn_all + empirical stochastic | 25 | 9,538.963 | 10,105.509 | 566.546 | 2,258.904 | 0 | 0.367 | 9,538.963 | 0.000 |
+| regime_tabpfn_all + point deterministic | 25 | 10,105.509 | 10,105.509 | 0.000 | 2,258.904 | 0 | 0.337 | 10,105.509 | 0.000 |
+
+| metric | difference | ci_low | ci_high | n_days |
+|---|---|---|---|---|
+| saving_won | 215.749 | -525.351 | 1,080.519 | 25 |
+| regret_won | -215.749 | -1,080.519 | 525.351 | 25 |
+
+판단: **forecasting 개선, decision 차이는 CI로 확정할 수 없음**. B−A saving 차이=215.7원/일. Ratchet event는 0일/25일이다. Ratchet floor가 이미 높게 정해진 TEST에서는 TOU 절감과 rare ratchet 회피를 구분해야 한다. 7/19은 기존 VALID 사례이며 이 TEST 표와 섞거나 다시 튜닝하지 않았다.
+
+```mermaid
+flowchart TD
+    A[D-1 available information] --> B[Operating regime detection]
+    B --> C[Regime-TabPFN]
+    C --> D[24h power / peak15 forecasts]
+    D --> E[Past-only empirical residual paths]
+    E --> F[30 joint scenarios]
+    F --> G[Stochastic MILP]
+    G --> H[Production schedule recommendation]
+    H --> I[Tariff / ratchet counterfactual cost evaluation]
+```
+
+이 절감은 실제 공장 intervention 결과가 아니라 실측 baseline+linear surrogate change에 기반한다. Forecast MAE가 낮아도 plan/regret 순위가 같다는 보장은 없다. 추천안과3seed별 결과는 production plans/daily decisions CSV, 그림은 `fig_test_decision_savings.png`, `fig_final_pipeline.png`에 있다.
 
 ## 제5장. 창의성 및 차별성 〔10점〕
 
@@ -276,12 +346,22 @@ pytest -q                  # 누수 감사 테스트 7개
 
 ---
 
+최종 재현은 `docs/PHASE3_FINAL_SYSTEM.md`와 `experiments/final_system_config.json`을 따른다. 전체 pytest35 passed. TEST 실행 전 integration/config commit과 audit를 보존했다. 기존 run_all.py는 historical baseline 재현용이며 새 최종 시스템 entry point는 experiments.final_system이다.
+
+TEST 결과 해석 보완: point primary MAE는 7.05% 감소했지만 날짜 paired CI는 0을 포함하고, peak-hour MAE는 8.047→8.147로 악화했다. Stochastic B−A 절감은 +216원/일, CI [−525,+1,081]로 확정적인 decision 개선 근거가 아니다. TEST에서는 ratchet floor가 전 날짜222kW이고 실제 초과0/25일이어서 ratchet Brier 개선은 false-positive 위험 감소를 나타내며 rare-event recall을 평가하지 못한다.
+
+기존 solver의 에너지 목적항은 Σ rate·(forecast power−S(original)+S(new))다. Forecast power는 계획과 무관한 상수이므로 공통 surrogate 아래에서는 point power MAE 개선 자체가 TOU 계획을 바꾸지 않는다. 예측 차이의 결정 전달 경로는 peak15/ratchet 위험이다. Point-only deterministic MILP는 이번 TEST에서 oracle과 같은 평균10,106원/일 절감, regret0을 기록했고 stochastic 선택 시스템은9,539원/일, regret567이었다. 이는 무사건 TEST에서 uncertainty가 보수적 계획 비용을 만들었다는 관찰이며, TEST를 보고 policy를 재선택하거나 rare-event에서 deterministic의 우월성을 주장하지 않는다.
+
+Residual pool은67일이고 초기 predictor의 작은 context부터 최종 TRAIN+VALID context까지 오차를 섞는다. TabPFN peak15 residual 평균−6.83kW의 비대칭과 context 크기 차이는 최종 모델 오차의 교환가능성에 한계가 있다. 사전 정의 pool을 유지했으며 사후 필터링/재보정하지 않았다.
+
 ## 한계
 - 복제·증강 데이터라 실제 공장 운영 성능으로 일반화할 수 없다.
 - 생산량을 전날 확정 계획으로 가정했다(실적이면 당일 누수). 시간별 계획 대신 일 단위 계획만 써도 테스트 MAE 약 7.2, 계획에 ±50% 잡음을 넣어도 약 6.9(누수 제거 전 측정, 재측정 필요).
 - 기상은 실측을 썼다(예보 사용 시 약간 악화 가능).
 - 피크 저감 효과는 선형 대리모형 기반 추정이다. 7/19 결과는 단일 사건이다.
 - 인건비 단가, 실제 요금 선택, ESS 설치비는 데이터에 없어 시나리오로 다뤘다.
+
+추가 한계: TabPFN pretrained prior/초기 weight 다운로드/CPU 비용, 작은 original residual sample, copy history, rare ratchet scarcity, 과거 repo의 TEST 재확인 기록, 신규 frozen TEST1회, surrogate counterfactual 및 실제 intervention 부재.
 
 ## 부록
 - 설문 완료 화면 캡처 (필수, 제출 전 첨부)

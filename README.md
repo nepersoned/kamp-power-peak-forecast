@@ -143,3 +143,17 @@ python -m experiments.forecast_model_search --stage rolling
 ```
 
 결과는 `outputs/forecast_models/`, 동결한 명세는 `experiments/forecast_model_selected.json`이다. TEST 실행 option은 없다. TabPFN은 명시한 공개 v2 checkpoint를 사용하며 최초 다운로드에는 인터넷이 필요하다. Offline 환경은 검증된 파일에 `KAMP_TABPFN_MODEL_PATH`를 지정한다. [설계·라이선스·재현](docs/PHASE2_FORECAST_SEARCH.md)을 확인한다. Phase 3에서는 선택 forecaster의 past-only residual을 새로 적합해야 한다.
+
+## Phase 3: frozen final system
+
+최종 구성은 Regime-TabPFN → 새 past-only residual pool → empirical K30/lambda0 → 기존 stochastic MILP다. TEST 1회 실행 전 코드/config commit과 audit를 남긴다. 기존 `run_all.py`는 historical baseline이며 최종 시스템은 아래 entry point를 사용한다.
+
+```bash
+python -m experiments.final_system --stage prepare
+python -m experiments.final_system --stage audit
+python -m experiments.final_system --stage test
+```
+
+동결 config가 있는 pre-TEST commit과 clean working tree에서 실행한다. 완료한 TEST ledger가 있으면 재실행을 거부한다. `--stage summarize`는 저장된 표만 재계산한다. [최종 설계·mask·재현](docs/PHASE3_FINAL_SYSTEM.md), [보고서 최종 비교](docs/REPORT_DRAFT.md)를 참고한다. TEST에서 primary MAE는6.727→6.252였지만 forecast/decision 차이 CI가0을 포함했고 ratchet 사건은0건이었다. TEST 결과로 모델/uncertainty/policy를 재선택하지 않았다.
+
+Forecast/decision 통합 계약과 전달 파일 설명은 [Forecast Model Handoff](docs/FORECAST_MODEL_HANDOFF.md)에 있다. Point/quantile CSV만으로 stochastic joint paths를 복원하지 않고, 별도 `handoff_joint_scenarios.csv`의 scenario×hour 배열을 전달한다.
