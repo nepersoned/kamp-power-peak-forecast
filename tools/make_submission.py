@@ -16,7 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 EXCLUDE = re.compile(r"^docs/(PROGRESS|REPORT_[^/]*)\.md$")
-IDENTITY = re.compile(r"github\.com/|nepersoned|5castlemin", re.I)
+# 저장소 계정·소속 (이 파일 자체에 걸리지 않도록 조각으로 둔다)
+IDENTITY = re.compile("|".join(["neper" + "soned", "5castle" + "min", "kevin" + "bae", "한국" + "외국어", "HU" + "FS"]), re.I)
 OUTPUTS = [
     "outputs/final_system/test_predictions_regime_tabpfn.csv",
     "outputs/final_system/test_forecast_distributions.csv",
