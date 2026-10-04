@@ -1,5 +1,2 @@
---extra-index-url https://download.pytorch.org/whl/cpu
--r requirements-phase1.txt
-statsmodels==0.14.6
-torch==2.14.1+cpu
-tabpfn==9.1.0
+# 통합됨: 전체 환경은 requirements.txt 하나로 관리한다(기존 문서의 설치 명령 호환용).
+-r requirements.txt
