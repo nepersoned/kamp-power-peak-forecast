@@ -291,10 +291,40 @@ def fnfp():
     return out
 
 
+def interaction(df, X, pairs=None, repeats=3, seed=0):
+    """최종 모델(Regime-TabPFN) 그룹 상호작용 = 두 그룹을 함께 섞은 오차 증가 − 각각 섞은 증가의 합.
+    양수면 두 그룹이 함께 쓰일 때 더 많은 정보를 준다(시너지). 테스트 가동일, 15분 최대수요."""
+    pairs = pairs or [("생산량 계획", "시각·달력"), ("전력 시차(전일·전주)", "시각·달력"), ("생산량 계획", "전력 시차(전일·전주)"),
+                      ("가동 스케줄(시작·종료)", "시각·달력"), ("생산량 계획", "가동 스케줄(시작·종료)"), ("기상", "시각·달력")]
+    m, tr, te = _fit_test(df, X, "regime_tabpfn_all", "peak15")
+    Xt = X[te]; on = operating(Xt); Xo, y = Xt[on], df["peak15"][te][on].to_numpy()
+    f = lambda Z: np.abs(m.on_model.predict(Z, None) - y).mean()
+    base = f(Xo)
+    rng = np.random.default_rng(seed)
+    single, rows = {}, []
+    def perm(groups):
+        out = []
+        for _ in range(repeats):
+            Z = Xo.copy(); idx = rng.permutation(len(Z))
+            cols = [c for g in groups for c in GROUPS[g]]
+            Z[cols] = Xo[cols].to_numpy()[idx]
+            out.append(f(Z) - base)
+        return float(np.mean(out))
+    for a, b in pairs:
+        for g in (a, b):
+            if g not in single:
+                single[g] = perm([g])
+        joint = perm([a, b])
+        rows.append(dict(group_a=a, group_b=b, inc_a=single[a], inc_b=single[b], inc_joint=joint,
+                         interaction=joint - single[a] - single[b]))
+        print(rows[-1], flush=True)
+    return pd.DataFrame(rows).sort_values("interaction", ascending=False)
+
+
 def main():
     warnings.filterwarnings("ignore")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["tables", "importance", "plan", "peak", "regime_info", "fnfp"], required=True)
+    ap.add_argument("--stage", choices=["tables", "importance", "plan", "peak", "regime_info", "fnfp", "interaction"], required=True)
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     df = load()
@@ -308,6 +338,10 @@ def main():
     elif a.stage == "importance":
         r = importance(df, X)
         r.to_csv(OUT / "group_importance_peak15.csv", index=False, encoding="utf-8-sig")
+        print(r.round(3).to_string())
+    elif a.stage == "interaction":
+        r = interaction(df, X)
+        r.to_csv(OUT / "interaction_peak15.csv", index=False, encoding="utf-8-sig")
         print(r.round(3).to_string())
     elif a.stage == "fnfp":
         for level, r in fnfp().items():
