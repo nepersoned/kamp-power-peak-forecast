@@ -321,10 +321,55 @@ def interaction(df, X, pairs=None, repeats=3, seed=0):
     return pd.DataFrame(rows).sort_values("interaction", ascending=False)
 
 
+def surrogate_check(n_boot=500, seed=0):
+    """권고 계획 평가용 대리모형의 정확도와 7/19 결과의 불확실성.
+    - 홀드아웃: 7/16 이전 원본 가동일로 적합 → 이후 원본 가동일 15분 최대수요 예측 R²·MAE
+    - 7/19: 학습 날짜를 부트스트랩해 대리모형을 다시 적합하고, 권고안 적용 시 기본요금 시간 최대수요 분포"""
+    from sklearn.linear_model import Ridge
+    from .milp import _S_numeric, fit_surrogate, surrogate_design
+    from . import tariff as T
+    df = load(); X = build(df)
+    on = operating(X); orig = ~df["is_copy"].to_numpy() & ~df["plan_missing"].to_numpy() & ~df["outage"].to_numpy()
+    t = df.index
+    tr = on & orig & (t >= START) & (t < "2021-07-16")
+    ho = on & orig & (t >= "2021-07-16") & (t < END)
+    out = {}
+    for tgt in ("peak15",):
+        Z_tr = surrogate_design(df.loc[tr, "prod"].fillna(0), df.loc[tr, "hour"], t[tr].normalize())
+        Z_ho = surrogate_design(df.loc[ho, "prod"].fillna(0), df.loc[ho, "hour"], t[ho].normalize()).reindex(columns=Z_tr.columns, fill_value=0)
+        m = Ridge(1.0).fit(Z_tr, df.loc[tr, tgt])
+        y = df.loc[ho, tgt].to_numpy(); p = m.predict(Z_ho)
+        out.update(holdout_r2=float(1 - ((y - p) ** 2).sum() / ((y - y.mean()) ** 2).sum()), holdout_mae=float(np.abs(y - p).mean()),
+                   train_days=int(pd.Index(t[tr].normalize()).nunique()), holdout_days=int(pd.Index(t[ho].normalize()).nunique()))
+    h = pd.read_csv(ROOT / "outputs/dashboard/hourly_2021-07-19.csv")
+    a, b = h["prod_original"].to_numpy(float), h["prod_recommended"].to_numpy(float)
+    bill = (h["tariff_band"] != "경부하").to_numpy()
+    act = h["actual_peak15"].to_numpy(float)
+    days = pd.Index(t[tr].normalize()).unique()
+    rng = np.random.default_rng(seed)
+    maxes = []
+    for _ in range(n_boot):
+        pick = rng.choice(days, len(days))
+        mask = np.zeros(len(df), bool)
+        dd = pd.Index(t.normalize())
+        w = pd.Series(pick).value_counts()
+        rows = np.concatenate([np.flatnonzero(tr & (dd == d)) for d in w.index for _ in range(w[d])])
+        sub = df.iloc[rows]
+        Z = surrogate_design(sub["prod"].fillna(0), sub["hour"], pd.Series(np.repeat(np.arange(len(rows) // 24 + 1), 24)[:len(rows)]))
+        c = pd.Series(Ridge(1.0).fit(Z, sub["peak15"]).coef_, Z.columns)
+        cf = dict(gain=np.array([c.get(f"on_h{k}", 0.0) for k in range(24)]), prev=c["on_prev"], next=c["on_next"], start=c["start"], beta=c["prod"])
+        new = np.clip(act + _S_numeric(b, cf) - _S_numeric(a, cf), 0, None)
+        maxes.append(new[bill].max())
+    maxes = np.array(maxes)
+    out.update(jul19_max_median=float(np.median(maxes)), jul19_max_p05=float(np.percentile(maxes, 5)), jul19_max_p95=float(np.percentile(maxes, 95)),
+               jul19_prob_below_206=float((maxes < 206).mean()))
+    return out
+
+
 def main():
     warnings.filterwarnings("ignore")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["tables", "importance", "plan", "peak", "regime_info", "fnfp", "interaction"], required=True)
+    ap.add_argument("--stage", choices=["tables", "importance", "plan", "peak", "regime_info", "fnfp", "interaction", "surrogate"], required=True)
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     df = load()
@@ -339,6 +384,10 @@ def main():
         r = importance(df, X)
         r.to_csv(OUT / "group_importance_peak15.csv", index=False, encoding="utf-8-sig")
         print(r.round(3).to_string())
+    elif a.stage == "surrogate":
+        r = surrogate_check()
+        pd.Series(r).to_csv(OUT / "surrogate_check.csv", encoding="utf-8-sig")
+        print(r)
     elif a.stage == "interaction":
         r = interaction(df, X)
         r.to_csv(OUT / "interaction_peak15.csv", index=False, encoding="utf-8-sig")
