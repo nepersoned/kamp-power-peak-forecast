@@ -8,6 +8,8 @@
 
 Python 3.12, CPU. 환경은 `requirements.txt` 하나로 통일했다.
 
+전체를 한 번에: `python run_pipeline.py` (테스트 → 비교 모델 → 최종 시스템 → 보고서 표·그림, CPU 약 45분). 단계별 실행은 아래와 같다.
+
 ```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt     # Linux/macOS: .venv/bin/python
