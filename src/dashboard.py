@@ -32,6 +32,13 @@ def exceed_prob(d, plan, scen, coefs):
     return float((peaks > d.floor).mean())
 
 
+def expected_excess(d, plan, scen, coefs):
+    """시나리오 평균 래칫 초과량(kW) = 확률 MILP가 실제로 줄이는 값(초과 확률이 아니라 초과 '크기'의 기대값)."""
+    dpk = _S_numeric(plan, coefs["peak15"]) - _S_numeric(d.prod, coefs["peak15"])
+    peaks = np.where((d.demand_band > T.OFF)[None, :], scen + dpk[None, :], 0).max(axis=1)
+    return float(np.clip(peaks - d.floor, 0, None).mean())
+
+
 def render(d, coefs, pool):
     scen = d.fc_pk[None, :] + pool
     plan = solve_stochastic(d, coefs, scen, lam=0.0, time_limit_s=60)
@@ -83,7 +90,14 @@ def render(d, coefs, pool):
         ax4.text(0.0, 0.9 - i * 0.27, s, fontsize=10.5, transform=ax4.transAxes,
                  fontweight="bold" if i == 0 else "normal", color=C_RED if (i == 0 and level == "높음") else "black")
     _save(fig, OUT, f"dashboard_{d.day:%Y-%m-%d}.png")
+    import pandas as pd
+    dpk_true = dpk  # 실측 반사실 = 실측 + 대리모형 변화분(decision_eval.true_cost와 같은 방식)
+    pd.DataFrame({"hour": h, "tariff_band": [BAND_NAME[b] for b in d.energy_band], "prod_original": d.prod,
+                  "prod_recommended": plan, "forecast_peak15_original": d.fc_pk, "forecast_peak15_recommended": d.fc_pk + dpk,
+                  "actual_peak15": d.act_pk, "actual_peak15_if_recommended": np.clip(d.act_pk + dpk_true, 0, None)}
+                 ).round(1).to_csv(OUT / f"hourly_{d.day:%Y-%m-%d}.csv", index=False, encoding="utf-8-sig")
     return dict(day=str(d.day.date()), level=level, p_exceed_before=p0, p_exceed_after=p1,
+                expected_excess_kw_before=expected_excess(d, d.prod, scen, coefs), expected_excess_kw_after=expected_excess(d, plan, scen, coefs),
                 expected_energy_saving=exp_energy, realized_saving=realized)
 
 

@@ -125,20 +125,41 @@ def importance():
 
 
 def value():
-    items = [("전력량요금 이동\n(평상시, 연 250일)", 9_242 * 250), ("7/19 래칫 회피\n(연 1회 사건)", 1_634_756),
-             ("요금제 선택Ⅱ\n(Ⅰ·Ⅲ 대비)", 1_100_000), ("소형 ESS\n22kW/11kWh", 2_200_000)]
-    fig, ax = plt.subplots(figsize=(7.5, 3.0))
-    ax.bar([k for k, _ in items], [v / 1e4 for _, v in items], color=[TAB, TAB, "#4a6fa5", "#4a6fa5"])
-    for i, (_, v) in enumerate(items):
+    """연간 가치를 성격별로 나눠 표시(합산하지 않음)."""
+    items = [("평상시 부하 이동\n(운영 절감, 연 250일)", 9_242 * 250, "#d9731a"), ("래칫 갱신 1건 회피\n(사건 발생 시)", 1_634_756, "#e8a56a"),
+             ("요금제 Ⅱ 유지·변경\n(현재 Ⅰ·Ⅲ일 때만)", 1_100_000, "#4a6fa5"), ("소형 ESS 22kW\n(설치비 차감 전)", 2_200_000, "#8aa2c8")]
+    fig, ax = plt.subplots(figsize=(8, 3.1))
+    ax.bar([k for k, _, _ in items], [v / 1e4 for _, v, _ in items], color=[c for *_, c in items])
+    for i, (_, v, _) in enumerate(items):
         ax.text(i, v / 1e4, f"{v / 1e4:,.0f}만 원", ha="center", va="bottom")
-    ax.set_ylabel("연간 절감(만 원)"); ax.set_title("현장 적용 시 연간 가치(추정, 주황 = 모델 기반 생산 조정)", fontsize=10)
-    ax.set_ylim(0, 270); ax.tick_params(axis="x", labelsize=8.5)
+    ax.axvline(1.5, color="#888", ls=":", lw=1)
+    ax.text(0.5, 262, "모델 기반 생산 조정", ha="center", fontsize=9, color="#d9731a")
+    ax.text(2.5, 262, "계약·설비 판단(모델과 별개)", ha="center", fontsize=9, color="#4a6fa5")
+    ax.set_ylabel("연간 금액(만 원)"); ax.set_ylim(0, 285); ax.tick_params(axis="x", labelsize=8.5)
+    ax.set_title("성격별 연간 가치 추정(서로 더하지 않음)", fontsize=10)
     save(fig, "r7_value.png")
+
+
+def surrogate():
+    """권고 계획 평가에 쓰는 대리모형: 시간대별로 '가동하면' 15분 최대수요가 얼마나 오르는가."""
+    import json
+    c = json.loads((O / "final_system/surrogate_coefficients.json").read_text())["peak15"]
+    g = np.array(c["gain"])
+    band = ["경"] * 9 + ["중"] + ["최"] * 2 + ["중"] + ["최"] * 4 + ["중"] * 6 + ["경"]   # 여름 요금 시간대(09~23시 기준)
+    col = {"경": "#c9ced4", "중": "#f2b134", "최": "#d9731a"}
+    fig, ax = plt.subplots(figsize=(9, 3.0))
+    ax.bar(range(24), g, color=[col[b] for b in band])
+    ax.axhline(0, color="#333", lw=0.8)
+    ax.set_xticks(range(0, 24, 2)); ax.set_xlabel("시각"); ax.set_ylabel("가동 시 15분 최대수요 증분(kW)")
+    ax.set_title(f"대리모형: 그 시각에 가동하면 +kW (생산 1,000단위당 +{c['beta'] * 1000:.1f}kW, 가동 시작 시 +{c['start']:.0f}kW)", fontsize=10)
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(color=col[k], label=v) for k, v in (("최", "최대부하"), ("중", "중간부하"), ("경", "경부하"))], frameon=False, fontsize=8.5, ncol=3)
+    save(fig, "r8_surrogate.png")
 
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    for f in (pipeline, model_compare, regime_effect, conditions, rolling, importance, value):
+    for f in (pipeline, model_compare, regime_effect, conditions, rolling, importance, value, surrogate):
         f()
     print(sorted(p.name for p in OUT.glob("*.png")))
 

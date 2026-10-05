@@ -3,6 +3,8 @@
     python -m src.final_analysis --stage tables       # F1·조건별 오차 (저장된 예측 파일만 사용, 수 초)
     python -m src.final_analysis --stage importance   # 피처 그룹 순열 중요도 (TabPFN·앙상블, 수십 분)
     python -m src.final_analysis --stage plan         # 생산계획 가정 민감도 (TabPFN, 수십 분)
+    python -m src.final_analysis --stage regime_info  # 생산계획 정보 수준별 성능(계획/지난주 가동/달력만, TabPFN)
+    python -m src.final_analysis --stage peak         # 권고 생산계획의 피크·전력량 변화(kW·kWh, 저장된 계획만 사용)
 
 입력:
   outputs/forecast_models/valid_*.csv  (python -m experiments.forecast_model_search --stage base / tabpfn)
@@ -155,10 +157,144 @@ def plan_sensitivity(df, name="regime_tabpfn_all", sigmas=(0.2, 0.5), seed=0):
     return pd.DataFrame(rows).assign(model=name)
 
 
+def peak_effect():
+    """최종 시스템이 권고한 생산계획(test_production_plans.csv)의 피크·전력량 변화.
+    실측 + 대리모형 변화분(decision_eval.true_cost와 같은 방식)으로 시간별 값을 다시 계산한다."""
+    import json
+    from . import tariff as T
+    from .milp import _S_numeric
+    fs = ROOT / "outputs/final_system"
+    coefs = {k: {kk: (np.array(vv) if isinstance(vv, list) else vv) for kk, vv in v.items()}
+             for k, v in json.loads((fs / "surrogate_coefficients.json").read_text()).items()}
+    plans = pd.read_csv(fs / "test_production_plans.csv")
+    df = load()
+    rows = []
+    for (day, system, seed), g in plans.groupby(["day", "system", "seed"]):
+        g = g.sort_values("hour")
+        idx = pd.date_range(day, periods=24, freq="h")
+        pk, pw = df.loc[idx, "peak15"].to_numpy(float), df.loc[idx, "power"].to_numpy(float)
+        a, b = g["original"].to_numpy(float), g["recommended"].to_numpy(float)
+        pk_new = np.clip(pk + _S_numeric(b, coefs["peak15"]) - _S_numeric(a, coefs["peak15"]), 0, None)
+        pw_new = np.clip(pw + _S_numeric(b, coefs["power"]) - _S_numeric(a, coefs["power"]), 0, None)
+        bands = T.hourly_bands(idx)
+        peak_h = (bands["energy_band"] == 2).to_numpy()          # 최대부하 요금 시간
+        bill_h = (bands["demand_band"] > T.OFF).to_numpy()         # 기본요금 산정 시간(경부하 제외)
+        rows.append(dict(day=day, system=system, seed=seed,
+                         bill_peak_before=pk[bill_h].max(initial=0.0), bill_peak_after=pk_new[bill_h].max(initial=0.0),
+                         peakband_peak_before=pk[peak_h].max(initial=0.0), peakband_peak_after=pk_new[peak_h].max(initial=0.0),
+                         peakband_kwh_before=pw[peak_h].sum(), peakband_kwh_after=pw_new[peak_h].sum(),
+                         hours_over_tau_before=int((pk[bill_h] >= TAU).sum()), hours_over_tau_after=int((pk_new[bill_h] >= TAU).sum()),
+                         day_kwh_before=pw.sum(), day_kwh_after=pw_new.sum()))
+    r = pd.DataFrame(rows)
+    day_mean = r.groupby(["system", "day"]).mean(numeric_only=True).reset_index()   # 시드 평균 후 날짜 평균
+    summ = day_mean.groupby("system").mean(numeric_only=True).drop(columns="seed")
+    summ["days"] = day_mean.groupby("system").size()
+    return r, summ
+
+
+def regime_info(name="regime_tabpfn_all"):
+    """'생산계획을 전날 안다'는 가정 점검. 레짐 판별과 계획 피처의 정보 수준을 낮추며 같은 모델을 재학습한다.
+    - 전날 확정 계획(기준): 시간별 생산계획 피처 + 계획으로 가동일 판별
+    - 지난주 같은 요일 가동 여부: 계획 피처 없음, 7일 전 같은 요일의 가동 여부로 가동일 판별
+    - 달력만: 계획 피처 없음, 평일(공휴일 제외)이면 가동일
+    평가: 검증 fold2(7/16~8/15, 휴가 포함)와 테스트. 모델 선정에는 쓰지 않는다."""
+    df = load()
+    X_plan = build(df)
+    X_none = build(df, use_plan=False)
+    day = df.index.normalize()
+    on_true = (df["prod"].fillna(0).groupby(day).transform("sum") > 0).astype(float)
+    on_lastweek = on_true.groupby(day).first().shift(7).reindex(day).to_numpy()
+    calendar = (X_none["is_offday"] == 0).astype(float).to_numpy()
+    variants = {"전날 확정 계획(기준)": X_plan,
+                "지난주 같은 요일 가동 여부": X_none.assign(plan_on_day=np.nan_to_num(on_lastweek, nan=1.0)),
+                "달력만(평일=가동)": X_none.assign(plan_on_day=calendar)}
+    t = df.index
+    ok = (~df["outage"]).to_numpy() & X_plan["power_lag168"].notna().to_numpy()
+    rows = []
+    for split, (fit_end, ev0, ev1) in {"검증 fold2": ("2021-07-16", "2021-07-16", "2021-08-16"),
+                                       "테스트": (TEST0, TEST0, END)}.items():
+        tr = ok & (t >= START) & (t < fit_end)
+        ev = ok & (t >= ev0) & (t < ev1)
+        for vname, X in variants.items():
+            wrong = float((X["plan_on_day"].fillna(1).to_numpy()[ev] != on_true.to_numpy()[ev]).mean())
+            r = dict(split=split, variant=vname, regime_error_rate=wrong)
+            for tgt in ("power", "peak15"):
+                m = make_forecaster(name).fit(X[tr], df[tgt][tr], df["hour"][tr], df["is_copy"].to_numpy()[tr])
+                p = m.predict(X[ev], df["hour"][ev])
+                y = df[tgt][ev].to_numpy()
+                r[f"{tgt}_mae"] = float(np.abs(p - y).mean())
+                if tgt == "peak15":
+                    dm = pd.DataFrame({"p": p, "y": y}, index=t[ev]).groupby(t[ev].normalize()).max()
+                    r["daily_max_mae"] = float((dm.p - dm.y).abs().mean())
+            rows.append(r)
+            print(r, flush=True)
+    return pd.DataFrame(rows)
+
+
+def fnfp():
+    """목표수요(TAU) 초과 판정의 FN·FP가 어떤 생산조건에 몰리는가 (최종 모델, 임계값은 검증에서 결정).
+    일 단위: 예측 일최대 >= 임계값이면 경보. 시간 단위: 예측 15분최대 >= 임계값이면 경보.
+    비교 기준선: '가동 평일이면 경보' 규칙."""
+    df = load()
+    day = df.index.normalize()
+    prod_day = df["prod"].fillna(0).groupby(day).sum()
+    hours_day = (df["prod"].fillna(0) > 0).groupby(day).sum()
+    op = prod_day > 0
+    after_off = op & ~op.shift(1, fill_value=True)          # 휴무 다음 첫 가동일
+    out = {}
+    for level in ("day", "hour"):
+        rows = []
+        for m in MODELS:
+            v = _valid(m); t = _test(); t = t[t.model == m]
+            if level == "day":
+                v, t = _daily_max(v), _daily_max(t)
+            else:
+                v = v[v.target == "peak15"].set_index("timestamp")[["point", "actual"]].rename(columns={"point": "pred", "actual": "act"})
+                t = t[t.target == "peak15"].set_index("timestamp")[["point", "actual"]].rename(columns={"point": "pred", "actual": "act"})
+            grid = np.arange(120, 215, 1.0)
+            thr = grid[int(np.argmax([f1_score(v.act >= TAU, v.pred >= g, zero_division=0) for g in grid]))]
+            t = t.assign(event=(t.act >= TAU), alarm=(t.pred >= thr))
+            idx = t.index.normalize() if level == "hour" else t.index
+            t["weekday"] = pd.Index(idx).dayofweek.map(lambda d: "월" if d == 0 else ("토·일" if d >= 5 else "화~금"))
+            t["after_off"] = pd.Index(idx).map(after_off).fillna(False).map({True: "휴무 다음 가동일", False: "그 외"})
+            t["long_day"] = pd.Index(idx).map(hours_day).map(lambda h: "생산 13시간 이상" if h >= 13 else "생산 12시간 이하")
+            if level == "hour":
+                h = t.index.hour
+                t["hour_band"] = np.select([(h >= 8) & (h <= 11), (h >= 13) & (h <= 16)], ["08~11시", "13~16시"], "그 외 시간")
+            t["outcome"] = np.select([t.event & t.alarm, t.event & ~t.alarm, ~t.event & t.alarm], ["TP", "FN", "FP"], "TN")
+            conds = ["weekday", "after_off", "long_day"] + (["hour_band"] if level == "hour" else [])
+            for c in conds:
+                for lv, g in t.groupby(c):
+                    vc = g.outcome.value_counts()
+                    rows.append(dict(model=m, threshold=thr, condition=c, level=lv, n=len(g),
+                                     TP=int(vc.get("TP", 0)), FN=int(vc.get("FN", 0)), FP=int(vc.get("FP", 0)), TN=int(vc.get("TN", 0))))
+            vc = t.outcome.value_counts()
+            rows.append(dict(model=m, threshold=thr, condition="전체", level="전체", n=len(t),
+                             TP=int(vc.get("TP", 0)), FN=int(vc.get("FN", 0)), FP=int(vc.get("FP", 0)), TN=int(vc.get("TN", 0))))
+        # 기준선: 가동 평일이면 경보
+        tt = _test(); tt = tt[(tt.model == MODELS[1]) & (tt.target == "peak15")].set_index("timestamp")
+        if level == "day":
+            dd = tt.groupby(tt.index.normalize()).agg(act=("actual", "max"))
+            rule = pd.Index(dd.index).map(lambda d: d.dayofweek < 5 and op.get(d, False))
+            ev = dd.act >= TAU
+        else:
+            rule = pd.Index(tt.index).map(lambda ts: ts.dayofweek < 5 and op.get(ts.normalize(), False) and 8 <= ts.hour <= 16)
+            ev = tt.actual >= TAU
+        rule = np.asarray(rule, bool); ev = np.asarray(ev, bool)
+        rows.append(dict(model="규칙(가동 평일" + ("" if level == "day" else " 08~16시") + ")", threshold=np.nan, condition="전체", level="전체",
+                         n=len(ev), TP=int((rule & ev).sum()), FN=int((~rule & ev).sum()), FP=int((rule & ~ev).sum()), TN=int((~rule & ~ev).sum())))
+        r = pd.DataFrame(rows)
+        r["precision"] = r.TP / (r.TP + r.FP).replace(0, np.nan)
+        r["recall"] = r.TP / (r.TP + r.FN).replace(0, np.nan)
+        r["f1"] = 2 * r.TP / (2 * r.TP + r.FP + r.FN).replace(0, np.nan)
+        out[level] = r
+    return out
+
+
 def main():
     warnings.filterwarnings("ignore")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["tables", "importance", "plan"], required=True)
+    ap.add_argument("--stage", choices=["tables", "importance", "plan", "peak", "regime_info", "fnfp"], required=True)
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     df = load()
@@ -173,6 +309,19 @@ def main():
         r = importance(df, X)
         r.to_csv(OUT / "group_importance_peak15.csv", index=False, encoding="utf-8-sig")
         print(r.round(3).to_string())
+    elif a.stage == "fnfp":
+        for level, r in fnfp().items():
+            r.to_csv(OUT / f"fnfp_{level}.csv", index=False, encoding="utf-8-sig")
+            print(level); print(r.round(2).to_string())
+    elif a.stage == "regime_info":
+        r = regime_info()
+        r.to_csv(OUT / "regime_info.csv", index=False, encoding="utf-8-sig")
+        print(r.round(3).to_string())
+    elif a.stage == "peak":
+        r, summ = peak_effect()
+        r.to_csv(OUT / "peak_effect_daily.csv", index=False, encoding="utf-8-sig")
+        summ.to_csv(OUT / "peak_effect_summary.csv", encoding="utf-8-sig")
+        print(summ.round(2).T.to_string())
     else:
         r = plan_sensitivity(df)
         r.to_csv(OUT / "plan_sensitivity.csv", index=False, encoding="utf-8-sig")
